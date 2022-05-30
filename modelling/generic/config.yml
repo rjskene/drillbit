@@ -1,0 +1,37 @@
+WORKSHEETS:
+    meta: BTC Meta
+    block_sched: Block Schedule
+    btc_price: BTC Projection
+    fees: Fee Projection
+    pools: Pools
+    projects: Projects
+    miners: Miners
+    cooling: Cooling
+    proj_comp: Project Comparison
+    proj_temp: __ProjectTemplate
+TABLES:
+    meta: MetaSumm
+    miners: MinerDB
+    cooling: CoolingProfiles
+    pools: PoolProfiles
+    projects: ProjectProfiles
+    block_sched: BlockSchedule
+    btc_price: BTCForecast
+    fees: FeeForecast
+    block_sched_inputs: B2:B3
+    btc_price_inputs: B2:B4
+    fees_inputs: B2:B4
+BUTTONS:
+    sim: SimulateMinesButton
+    block_sched: ScheduleButton
+    btc_price: BTCForecastButton
+    fees: FeeForecastButton
+CHECKLIST_CELLS:
+    block_sched: B13
+    btc_price: B14
+    fees: B15
+LOAD_CELLS:
+    pools: P2
+    miners: L2
+CHARTS:
+    env: 'Mining Environment'
