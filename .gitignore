@@ -141,7 +141,7 @@ cython_debug/
 .python-version
 *.mp4
 *.csv
-.pkl
+*.pkl
 *.xlsx
 *.xlsm
 *.jpg
