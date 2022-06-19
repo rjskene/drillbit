@@ -18,7 +18,7 @@ class MagnitudeTable:
         'exa': {'magnitude': 18, 'abbr': 'E'},
         'zetta': {'magnitude': 21, 'abbr': 'Z'},
         'yotta': {'magnitude': 24, 'abbr': 'Y'},
-        'ronna': {'magnitude': 27, 'abbr': 'R'},        
+        'ronna': {'magnitude': 27, 'abbr': 'R'},
     }
     
     def __new__(cls, abbr, units, inverse=False):
@@ -167,6 +167,7 @@ class InverseUnits(BaseUnits):
 class MultiUnitMixin:
     def __new__(cls, value, abbr=None, **kwargs):
         cls.MAGKEY = cls._get_magkey_(cls, abbr)
+        cls._magkey = cls.MAGKEY
         return super().__new__(cls, value, abbr=abbr, **kwargs)
 
     def __init__(self, value, abbr=None, **kwargs):

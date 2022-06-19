@@ -46,6 +46,8 @@ def sim_mining(
     energy = miner_energy + cool_energy
     
     hashes = (n_miners.T * hashes_per_miner).T
+    if np.all(hashes == 0):
+        raise ValueError('There are no more miners.')
     shares = hashes / hashes.sum(axis=0)
     
     assert np.allclose(shares.sum(axis=0), 1), shares.sum(axis=0)

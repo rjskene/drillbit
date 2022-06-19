@@ -1,4 +1,5 @@
 import http
+from pywintypes import com_error
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -11,7 +12,12 @@ def render(ws, fig, parent_path, filename, img_name):
     img_path = parent_path / 'img' / f'{filename}.png'
     plt.savefig(img_path)
 
-    ws.pictures.add(img_path, name=ws.name + f' {img_name}', update=True, left=ws.range('E7').left)
+    try:
+        ws.pictures.add(img_path, name=ws.name + f' {img_name}', update=True, left=ws.range('E7').left)
+    except com_error as e:
+        print (f'Error saving {img_name}')
+        print (repr(e))
+
     plt.close(fig)
 
 def chart_block_sched(state, ws):
@@ -222,6 +228,7 @@ def chart_miner_comps(state, ws):
         project.n_miners.iloc[mine.implement.start_in_blocks():].resample('D').last().iloc[:-1].plot(ax=ax, label=mine.name)
 
     ax.set_xlabel('')
+    ax.legend()
     ax.set_title('Number of Miners')
 
     render(ws, fig, state.parent_path, 'project_comps_miners', 'Nubmer of Miners Project Comparison')
@@ -240,7 +247,7 @@ def chart_hr_project_comps(state, ws):
     ax.set_ylabel(tick1.units, rotation=0, labelpad=20, fontsize=12)
 
     ax.set_xlabel('')
-
+    ax.legend()
     ax.set_title('Hash Rate')
 
     render(ws, fig, state.parent_path, 'project_comps_hr', 'Hash Rate Project Comparison')
@@ -259,7 +266,7 @@ def chart_energy_project_comps(state, ws):
     ax.set_ylabel(tick1.units, rotation=0, labelpad=20, fontsize=12)
 
     ax.set_xlabel('')
-
+    ax.legend()
     ax.set_title('Daily Energy Consumption')
 
     render(ws, fig, state.parent_path, 'project_comps_energy', 'Energy Project Comparison')
@@ -278,7 +285,7 @@ def chart_mined_energy_project_comps(state, ws):
     ax.set_ylabel(tick1.units, rotation=0, labelpad=20, fontsize=12)
 
     ax.set_xlabel('')
-
+    ax.legend()
     ax.set_title('Daily Energy Consumption - Miners')
 
     render(ws, fig, state.parent_path, 'project_comps_energy_miners', 'Miner Energy Project Comparison')
@@ -291,7 +298,7 @@ def chart_win_per_project_comps(state, ws):
 
     ax.yaxis.set_major_formatter(grc_style.per_fmt)
     ax.set_xlabel('')
-
+    ax.legend()
     ax.set_title('Daily Average Win Percentage')
 
     render(ws, fig, state.parent_path, 'project_comps_win_per', 'Win Percentage Project Comparison')
@@ -304,7 +311,7 @@ def chart_btc_mined_project_comps(state, ws):
 
     ax.yaxis.set_major_formatter(grc_style.btc_fmt)
     ax.set_xlabel('')
-
+    ax.legend()
     ax.set_title('Daily BTC Mined')
 
     render(ws, fig, state.parent_path, 'project_comps_btc_mined', 'BTC Mined Project Comparison')
@@ -313,11 +320,11 @@ def chart_gm_project_comps(state, ws):
     fig, ax = plt.subplots(**PLOT_KWARGS)
 
     for lineitem, mine in zip(state.projstats.projects.by_lineitem('gm'), state.projstats.projects.mines):
-        lineitem.iloc[mine.implement.start_in_blocks():].resample('D').sum().iloc[:-1].plot(ax=ax, label=mine.name)
+        lineitem.iloc[mine.implement.start_in_blocks():].resample('D').mean().iloc[:-1].plot(ax=ax, label=mine.name)
 
     ax.yaxis.set_major_formatter(grc_style.per_fmt)
     ax.set_xlabel('')
-
+    ax.legend()
     ax.set_title('Daily Average Gross Margin')
 
     render(ws, fig, state.parent_path, 'project_comps_gm', 'Gross Margin Project Comparison')
@@ -330,7 +337,7 @@ def chart_btc_value_held_project_comps(state, ws):
 
     ax.yaxis.set_major_formatter(grc_style.mill_fmt)
     ax.set_xlabel('')
-
+    ax.legend()
     ax.set_title('Value of BTC Held')
 
     render(ws, fig, state.parent_path, 'project_comps_btc_held', 'BTC Held Project Comparison')
@@ -344,7 +351,7 @@ def chart_roi_project_comps(state, ws):
 
     ax.yaxis.set_major_formatter(grc_style.per_fmt)
     ax.set_xlabel('')
-
+    ax.legend()
     ax.set_title('ROI, if held')
 
     render(ws, fig, state.parent_path, 'project_comps_roi_held', 'ROI Held Project Comparison')

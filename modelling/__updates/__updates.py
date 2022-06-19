@@ -11,6 +11,11 @@ def tbl_rng(ws, tbl):
     return State.get_table(ws, tbl).address
 
 @xw.func
+def update_config():
+    State.update_config()
+    modelmkr.warn_sim()
+
+@xw.func
 def update_miners():
     State.update_miners()
     State.update_mines() # have to update mines for changes in cooling objects
@@ -67,10 +72,12 @@ def load_mines():
     modelmkr.load_mines()
 
 @xw.sub
+def load_pools():
+    modelmkr.load_pools()
+
+@xw.sub
 def simulate_mining_env():
     modelmkr.create(
-        update_charts=True,
-        insert_stats=True,
         btn_sheet=State.WS['meta'],
         btn_name=State.BUTTONS['sim'],
         tracker_sheet=State.WS['meta'],
@@ -87,7 +94,6 @@ def simulate_mining_env():
 from xlwings.server import loop
 if loop.is_running() and __name__.split('.')[0] in xw.books.active.name:
     State, modelmkr = on_import(GenericModelMaker, __file__, state_constructor=SheetState)
-
 
 """
 FUNCTIONS USED FOR TESTING

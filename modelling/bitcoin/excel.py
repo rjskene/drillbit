@@ -1,11 +1,27 @@
-from tqdm.auto import tqdm
-from xlwings.utils import rgb_to_int
+from abc import ABC, abstractmethod
+import string
+import itertools as it
+import win32api
+import win32con
 
-from .state import SheetState
+from xlwings.utils import rgb_to_int
+from xlwings.conversion import Converter, PandasDataFrameConverter
+
 from .charts import charts
 from .style import grc_style
 
-from abc import ABC, abstractmethod
+def excel_columns():
+    abeta = list(string.ascii_uppercase)
+    abeta2 = [''.join(pair) for pair in it.product(abeta, abeta)]
+    abeta3 = [''.join(trip) for trip in it.product(abeta, abeta, abeta)]
+
+    return abeta + abeta2 + abeta3
+
+def msgbox(wb, msg, kind='Info'):
+    win32api.MessageBox(
+        wb.app.hwnd, msg, kind,
+        win32con.MB_ICONINFORMATION
+    )
 
 def btn_warning(ws, btn_name, msg):
     btn = ws.api.OLEObjects(btn_name)
@@ -16,6 +32,14 @@ def button_update(state, ws, model):
     ws.api.OLEObjects(state.BUTTONS[model]).Object.BackColor = rgb_to_int(grc_style.vvlblue.hex_to_rgb())
     ws.api.OLEObjects(state.BUTTONS[model]).Object.Caption = 'Updated!'
     state.wb.sheets[state.WS['meta']].range(state.CHECKLIST_CELLS[model]).value = 1
+
+class DataFrameDropna(Converter):
+
+    base = PandasDataFrameConverter
+
+    @staticmethod
+    def read_value(builtin_df, options):
+        return builtin_df.dropna()
 
 class AbstractBaseModelMaker(ABC):
     def __init__(self, state):
@@ -54,7 +78,7 @@ class AbstractBaseModelMaker(ABC):
         charts.chart_block_sched(self.state, ws)
 
     def generate_btc_forecast(self):
-        ws = self.state.wb.sheets[self.state.WS['btc_price']]
+        ws = self.state.get_ws('btc_price')
         btc_price = self.state.generate_btc_forecast()
         frame = btc_price.to_frame()
         frame.columns = ['Price']
@@ -95,3 +119,4 @@ class AbstractBaseModelMaker(ABC):
 
     def warn_fees(self):
         self.warn('fees')
+        

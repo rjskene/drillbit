@@ -8,11 +8,11 @@ from btc import sim
 from bitcoin.charts import charts
 from bitcoin.style import grc_style
 from bitcoin.state import SheetState
-from bitcoin.helpers import pbar_update, msgbox
-from bitcoin.excel import AbstractBaseModelMaker
+from bitcoin.helpers import pbar_update
+from bitcoin.excel import AbstractBaseModelMaker, msgbox
 
 from .statements import MineStats, init_enviro
-from .charts import chart_operational_mines, count_operational, mine_gross_margin, env_sim_pre_processing
+from .charts import chart_operational_mines, count_operational, mine_gross_margin, env_sim_pre_processing, mine_hash_rate
 
 def check_ready(state):
     ws = state.wb.sheets[state.WS['meta']]
@@ -55,41 +55,49 @@ class EnviroModelMaker(AbstractBaseModelMaker):
     def validation(self, *args, **kwargs):
         return check_ready(self.state)
 
-    def simulate_mining_environment(self, env):
+    def simulate_mining_environment(self, env, mines):
         ends = sim.retgt_ranges(self.state.block_sched, self.state.BTC.RETARGET_BLOCKS)
-        financials, _ = sim.simulate(self.state.mines, self.state.block_sched, env.mkt_rev.values, ends, pbar_kws={'leave': False})
+        financials, _ = sim.simulate(mines, self.state.block_sched, env.mkt_rev.values, ends, pbar_kws={'leave': False})
         return financials
 
-    def generate_statements(self, **kwargs):
+    def generate_statements(self, mines, pbar=None, **kwargs):
         financials = kwargs.pop('financials')
         env = kwargs.pop('env')
 
         self.state.mines.implement(self.state.periods.size)
-        minerstats = MineStats(self.state.mines, financials[:, sim.ARRAY_KEY['miner_energy']], financials[:, sim.ARRAY_KEY['hashes']], self.state.periods)
-        minerstats.finalize(env, financials[:, sim.ARRAY_KEY['hashes']].sum(axis=0))
+        minerstats = MineStats(mines, financials[:, sim.ARRAY_KEY['miner_energy']], financials[:, sim.ARRAY_KEY['hashes']], self.state.periods, pbar=pbar)
+        minerstats.finalize(env, financials[:, sim.ARRAY_KEY['hashes']].sum(axis=0), pbar=pbar)
         self.state.set_global_environment(env)
         self.state.set_mine_statements(minerstats)
 
-    def initialize(self,**kwargs):
-        pbar = kwargs.pop('pbar', None)
+    def initialize(self, pbar=None, **kwargs):
         env = init_enviro(self.state.block_sched, self.state.traxn_fees, self.state.btc_price)
 
         with pbar_update(pbar, desc='Creating environment data...') as p:
-            financials = self.simulate_mining_environment(env)
+            if self.state.pools_only: # whether to include only Pools or both Pools & Projects in environment
+                mines = self.state.mines.pools
+            else:
+                mines = self.state.mines
+
+            financials = self.simulate_mining_environment(env, mines)
 
         with pbar_update(pbar, desc='Generating mining statements...') as p:
-            self.generate_statements(financials=financials, env=env)
+            self.generate_statements(mines, financials=financials, env=env, pbar=pbar)
 
     def create_charts(self, **kwargs):
         pbar = kwargs.pop('pbar', None)
         chart_sheet = kwargs.pop('chart_sheet')
-        op, count, gm, halve_ticks = env_sim_pre_processing(self.state)
+        op, count, gm, halve_ticks, hr = env_sim_pre_processing(self.state)
 
         chart_operational_mines(op, halve_ticks, chart_sheet, self.state.parent_path)
         if pbar is not None:
             pbar.update(1)
 
         mine_gross_margin(gm, halve_ticks, chart_sheet, self.state.parent_path)
+        if pbar is not None:
+            pbar.update(1)
+
+        mine_hash_rate(hr, halve_ticks, chart_sheet, self.state.parent_path)
         if pbar is not None:
             pbar.update(1)
 
@@ -130,7 +138,13 @@ class EnviroModelMaker(AbstractBaseModelMaker):
         btn_sheet.api.OLEObjects(btn_name).Object.BackColor = rgb_to_int(grc_style.vvlblue.hex_to_rgb())
         btn_sheet.api.OLEObjects(btn_name).Object.Caption = 'Updated!'
 
-    def create(self, update_charts=True, pbar_kws={}, **kwargs):
+    def create(self, complete_msg=True, pbar_kws={}, **kwargs):
+        update_charts = kwargs.pop('update_charts', self.state.update_charts)
+        insert_stats = kwargs.pop('insert_stats', self.state.insert_statements)
+        wipe_stats = kwargs.pop('wipe_stats', False)
+        if wipe_stats:
+            self.state.wipe()
+
         kwargs['btn_sheet'] = self.state.wb.sheets[kwargs.get('btn_sheet', 'BTC Meta')]
         kwargs['tracker_sheet'] = self.state.wb.sheets[kwargs.get('tracker_sheet', 'BTC Meta')]
         kwargs['chart_sheet'] = self.state.wb.sheets[kwargs.get('chart_sheet', 'Mining Environment')]
@@ -139,21 +153,23 @@ class EnviroModelMaker(AbstractBaseModelMaker):
         if validated:
             with tqdm(**pbar_kws) as pbar:
                 pbar.set_description('Initializing...')
-                self.initialize(pbar=pbar, **kwargs)               
+                self.initialize(pbar=pbar, **kwargs)
 
                 if update_charts:
                     pbar.set_description('Creating charts...')
                     self.create_charts(pbar=pbar, **kwargs)
 
-                with pbar_update(pbar, desc='Inserting statements...') as p: 
-                    self.insert_statements(pbar=pbar, **kwargs)
+                if insert_stats:
+                    with pbar_update(pbar, desc='Inserting statements...') as p: 
+                        self.insert_statements(pbar=pbar, **kwargs)
 
                 with pbar_update(pbar, desc='Update formats...') as p: 
                     self.update_formats(pbar=pbar, **kwargs)
    
                 pbar.set_description('Complete.')
 
-        msgbox(self.state.wb, 'Simulation Complete.')
+        if complete_msg:
+            msgbox(self.state.wb, 'Simulation Complete.')
 
     def get_miner_profiles_to_load(self):
         profiles_to_load('miners', self.state)
@@ -173,10 +189,12 @@ class EnviroModelMaker(AbstractBaseModelMaker):
     def load_pools(self):
         load_profiles('pools', self.state)
 
-def on_import(ModelMaker, filepath, load_profiles=True):
+def on_import(ModelMaker, filepath, load_profiles=True, state_constructor=None, complete_msg=True):
     with tqdm(total=5) as t:
         with pbar_update(t, desc='Initiaiting state...') as p:
-            State = SheetState(filepath)
+            if state_constructor is None:
+                state_constructor = SheetState
+            State = state_constructor(filepath)
             State.update_btc()
             modelmkr = ModelMaker(State)
 
@@ -203,6 +221,7 @@ def on_import(ModelMaker, filepath, load_profiles=True):
         modelmkr.warn_sim()
         State.wb.app.enable_events = True
 
-    msgbox(State.wb, 'Import complete.')
+    if complete_msg:
+        msgbox(State.wb, 'Import complete.')
 
     return State, modelmkr

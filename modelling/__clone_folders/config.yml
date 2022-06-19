@@ -17,11 +17,10 @@ TABLES:
     projects: ProjectProfiles
     block_sched: BlockSchedule
     btc_price: BTCForecast
-    btc_cagrs: D9
     fees: FeeForecast
     block_sched_inputs: B2:B3
-    btc_price_inputs: B2:B5
-    fees_inputs: B2:B5
+    btc_price_inputs: B2:B4
+    fees_inputs: B2:B4
 BUTTONS:
     sim: SimulateMinesButton
     block_sched: ScheduleButton
@@ -31,13 +30,8 @@ CHECKLIST_CELLS:
     block_sched: B13
     btc_price: B14
     fees: B15
-COOLING_PRODUCTS:
-    data: 'cooling/products.xlsx'
-    detail: 'A2:B7'
-    components: 'D2:G6'
 LOAD_CELLS:
     pools: P2
     miners: L2
 CHARTS:
-    env: Mining Environment
-POOLS_ONLY: True
+    env: 'Mining Environment'

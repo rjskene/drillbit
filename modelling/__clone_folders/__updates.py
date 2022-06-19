@@ -1,25 +1,13 @@
-import xlwings as xw
-
-from bitcoin.price_lookups import price_lookup
-from bitcoin.demo import mining_demo, mining_demo_avg
-from bitcoin.state import SheetState
-from .excel import GenericModelMaker, on_import
-
-@xw.func
-def tbl_rng(ws, tbl):
-    # Used for Worksheet_change calls in VBA to trigger State updates
-    return State.get_table(ws, tbl).address
+from generic.generic import *
 
 @xw.func
 def update_miners():
     State.update_miners()
-    State.update_mines() # have to update mines for changes in cooling objects
     modelmkr.warn_sim()
 
 @xw.func
 def update_cooling():
     State.update_cooling()
-    State.update_mines() # have to update mines for changes in cooling objects
     modelmkr.warn_sim()
 
 @xw.func
@@ -70,14 +58,12 @@ def load_mines():
 def simulate_mining_env():
     modelmkr.create(
         update_charts=True,
-        insert_stats=True,
         btn_sheet=State.WS['meta'],
         btn_name=State.BUTTONS['sim'],
         tracker_sheet=State.WS['meta'],
         tracker_cells=list(State.CHECKLIST_CELLS.values()),
         chart_sheet=State.CHARTS['env'],
-        pbar_kws=dict(total=100),
-        wipe_stats=True
+        pbar_kws=dict(total=25)
     )
 
 ### Start-up code ONLY executes if there is a recognizable
@@ -86,12 +72,4 @@ def simulate_mining_env():
 ### and not when import elsewhere like Jupyter
 from xlwings.server import loop
 if loop.is_running() and __name__.split('.')[0] in xw.books.active.name:
-    State, modelmkr = on_import(GenericModelMaker, __file__, state_constructor=SheetState)
-
-
-"""
-FUNCTIONS USED FOR TESTING
-"""
-@xw.func
-def miner_eff(mine):
-    return State.mines[mine].miner.eff
+    State, modelmkr = on_import(GenericModelMaker, __file__)

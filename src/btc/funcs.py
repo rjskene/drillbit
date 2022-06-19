@@ -68,8 +68,12 @@ def mining_rate(difficulty, hash_rate, reward, days=1):
 def cooling_energy(energy, pue):
     return energy * (pue - 1)
 
-def geometric_brownian_motion(S0, n, T, mu=0.01, sigma=0.01):
+def compound_growth(init, g, n):
+    arr = np.ones(n)
+    arr[1:] += g
+    return init * arr.cumprod()
 
+def geometric_brownian_motion(S0, n, T, mu=0.01, sigma=0.01):
     dt = T / n
     t = np.arange(n)
     W = np.random.standard_normal(size=n)
@@ -119,6 +123,9 @@ class MiningMixin:
 
     def cogs_per_block(self, power, cost):
         return power.consumption_per_block() * cost
+
+    def cgr(self, price, n, g):
+        return compound_growth(price, g, n)
 
     def gbm(self, price, periods, *args, **kwargs):
         n = periods.size

@@ -55,18 +55,15 @@ class Miner(MinerPropertiesMixin):
     def __init__(self, 
         name: str, make: str, model: str, generation: str, manufacturer: str,
         price: float, 
+        power: Power, 
+        hash_rate: HashRate, 
         amortization: int=60, 
         short_name: str = None,
-        power: Power = None, 
-        hash_rate: HashRate = None, 
-        efficiency: Efficiency = None,
-        variance: float = 0, 
+        variance: float = 0,
+        buffer: float=0,
         overclock: float = 0,
         operate: bool = True,
         ):
-        if pd.Series([power, hash_rate, efficiency]).isna().sum() > 1:
-            raise ValueError('You must provide two of three of `power`, `hash_rate`, and `efficency`')
-
         self.name = name
         self.make = make
         self.model = model
@@ -79,7 +76,9 @@ class Miner(MinerPropertiesMixin):
             short_name = self.name.replace(' ', '').lower()
         self.short_name = short_name
 
-        self._specifications = Spec(power, hash_rate, efficiency, variance)
+        self._specifications = Spec(power, hash_rate)
+        self.variance = variance
+        self.buffer = buffer
         self._operate = operate
 
         self.set_overclock(overclock)
@@ -105,9 +104,9 @@ class Miner(MinerPropertiesMixin):
     def power(self):
         if self.operating:
             if self.overclock:
-                return self.OC.power_by_factor()
+                return Power(self.OC.power_by_factor() * (1 + self.buffer))
             else:
-                return self.specs.power
+                return Power(self.specs.power * (1 + self.buffer))
         else:
             return Power(0)
 
@@ -155,7 +154,7 @@ class Miner(MinerPropertiesMixin):
         return consumption_in_Wh(self.power, **duration)
 
     def consumption_variance(self, n, std=None):
-        std = self.specs.variance / 2 if std is None else std
+        std = self.variance / 2 if std is None else std
         return 1 + np.random.normal(0, std, n)
 
     def as_series(self, as_repr=False):
@@ -169,28 +168,17 @@ class Miner(MinerPropertiesMixin):
         return ser
 
 class Spec(MinerPropertiesMixin):
-    def __init__(self, power=None, hash_rate=None, efficiency=None, variance=0):
-        self.power, self.hash_rate, self.efficiency = power, hash_rate, efficiency
-        self.variance = variance
-
-        if self.power is None:
-            self.power = self.power_calc
-        elif self.hash_rate is None:
-            self.hash_rate = self.hr_calc
-        elif self.efficiency is None:
-            self.efficiency = self.eff_calc
+    def __init__(self, power, hash_rate):
+        self.power = power
+        self.hash_rate = hash_rate
 
     @property
-    def power_calc(self):
-        return self.efficiency * self.hr
-
-    @property
-    def hr_calc(self):
-        return self.power / self.efficiency
-
-    @property
-    def eff_calc(self):
+    def efficiency(self):
         return self.power / self.hr
+
+    @property
+    def eff(self):
+        return self.efficiency
 
 class OverClock:
     """
@@ -198,7 +186,7 @@ class OverClock:
     """
     a = 2.6696 # units of 1 / TH/s
     b = 23.33  # units of W / TH/s
-    BASEMINER = Miner('Antminer S19', 'Antminer', 'S19', 'Base', 'Bitmain', 7000, 60, power=Power(3250), hash_rate=HashRate(96, 'TH'))
+    BASEMINER = Miner('Antminer S19', 'Antminer', 'S19', 'Base', 'Bitmain', price=7000, power=Power(3250), hash_rate=HashRate(96, 'TH'))
     
     def __init__(self, factor=0, miner=None, max_power=Power(6250), func=None):
         self._power_factor = factor
@@ -265,12 +253,73 @@ class OverClock:
         return self.eff_by_factor(n).hash_rate(power)
 
 @dataclass
+class CoolingProduct:
+    name: str
+    manufacturer: str
+    n_miners: int
+    cost_schedule: pd.DataFrame
+    options: list = None
+    short_name: str = None
+    dimensions: tuple = ()
+    h: float = None
+    w: float = None
+    l: float = None
+    
+    def __post_init__(self):
+        if self.options:
+            self.options += ['base']            
+        else:
+            self.options = ['base']
+
+        if self.short_name is None:
+            self.short_name = self._shorten(self.name)
+
+        if self.dimensions:
+            self.l, self.w, self.h = self.dimensions
+        else:
+            dimensions = np.ma.array([self.l, self.w, self.h])
+            if (dimensions == None).any():
+                self.dimensions = None
+            else:
+                self.dimensions = (self.l, self.w, self.h)
+
+    def __repr__(self):
+        return f'CoolingProduct(name={self.name}, manufacturer={self.manufacturer}, ' \
+            f'n_miners={self.n_miners}, options={self.options}, short_name={self.short_name}, ' \
+            f'dimensions={self.dimensions})'
+
+    def _shorten(self, *args, **kwargs):
+        return _shorten(*args, **kwargs)
+
+    def package_cost_schedule(self, option:str='base'):
+        assert option in self.options, f'option:{option}, options:{self.options}'
+        
+        packages = ['base']
+        if option not in packages:
+            packages.append(option)
+
+        return self.cost_schedule[self.cost_schedule.Package.isin(packages)]
+
+    def footprint(self):
+        return Area(self.l * self.w)
+    
+    def all_in_cost(self, *args, **kwargs):
+        allowed_units = ['unit', 'miner']
+        cost_sched = self.package_cost_schedule(*args, **kwargs)
+        cost_by_unit = cost_sched.groupby('Units').sum()
+        cost_by_unit.index = pd.CategoricalIndex(cost_by_unit.index, categories=allowed_units, ordered=True)
+        cost_by_unit = cost_by_unit.sort_index()
+        scales = np.array([1, self.n_miners])
+        return np.sum(cost_by_unit.Price.values * scales[:cost_by_unit.index.size])
+
+@dataclass
 class Cooling:
     """Class for keeping track of an item in inventory."""
     name: str
-    capex: float
+    product: CoolingProduct
+    infrastructure: float
     pue: float
-    style: str
+    option: str = 'Base'
     amortization: float = 60
     short_name: str = None
 
@@ -285,6 +334,13 @@ class Cooling:
     def amort(self):
         return self.amortization
 
+    @property
+    def infra(self):
+        return self.infrastructure
+    
+    def project_cost(self, mine):
+        return mine.power * self.infra + mine.cooling_units * self.product.all_in_cost(self.option)
+    
     def ancillary_consumption(self, energy):
         try:
             iteration = iter(energy)
@@ -386,6 +442,10 @@ class Mining(MiningMixin):
             return int(self.power_for_miners // self.miner.power)
 
     @property
+    def cooling_units(self):
+        return np.ceil(self.n_miners / self.cooling.product.n_miners).astype(int)
+
+    @property
     def hash_rate(self):
         return HashRate(self.n_miners * self.miner.hr)
 
@@ -399,7 +459,7 @@ class Mining(MiningMixin):
 
     @property
     def cost_of_cooling(self):
-        return self.power * self.cooling.capex
+        return self.cooling.project_cost(self)
 
     @property
     def cost_of_miners(self):
@@ -515,16 +575,26 @@ class Profiles(np.ndarray):
             return {k: v for k, v in cls.__dict__.items() if '__' not in k and k != 'attrs'}
 
     @staticmethod
+    def _convert_units(cls, kws, **units):
+        for k, v in cls.converters.attrs.items():
+            if k in kws:
+                klass, unit = v
+                if k in units:
+                    unit = units[k]
+                kws[k] = klass(kws[k], unit)
+
+        return kws
+
+    @staticmethod
+    def _construct_obj(cls, kws, **units):
+        kws = cls._convert_units(cls, kws, **units)        
+        return cls._constructor(**kws)
+
+    @staticmethod
     def _construct_objs(cls, df, **units):
         objs = []
         for kws in list(df.T.to_dict().values()):
-            for k, v in cls.converters.attrs.items():
-                if k in kws:
-                    klass, unit = v
-                    if k in units:
-                        unit = units[k]
-                    kws[k] = klass(kws[k], unit)
-            obj = cls._constructor(**kws)
+            obj = cls._construct_obj(cls, kws, **units)
             objs.append(obj)
 
         return objs
@@ -576,7 +646,10 @@ class Profiles(np.ndarray):
             if item in self.df.name.values:
                 iloc = self.df[self.df.name == item]['index'].iloc[0]
                 return self[iloc]
-        return super().__getitem__(item)
+            else:
+                raise ValueError(f'{item} was not found in the profiles.')
+        else:
+            return super().__getitem__(item)
 
     @property
     def names(self):
@@ -597,9 +670,63 @@ class Miners(Profiles):
         joined = ', '.join([s.name for s in self])
         return f'Miners([{joined}])'
 
+class CoolingProducts(np.ndarray):
+    def __new__(cls, objs):
+        return np.asarray([o for o in objs], dtype='object').view(cls)
+        
+    def __repr__(self):
+        joined = ', '.join([s.name for s in self])
+        return f'CoolingProducts([{joined}])'
+    
+    def __getattribute__(self, name):
+        names = object.__getattribute__(self, 'names')
+        short_names = object.__getattribute__(self, 'short_names')
+
+        if name == '__array_finalize__':
+            return super().__getattribute__(name)
+        elif name in short_names:
+                return self[short_names == name][0]
+        elif name in names:
+                return self[names == name][0]
+        else:
+            return super().__getattribute__(name)
+    
+    def __getitem__(self, item):
+        if isinstance(item, str):
+            if item in self.names:
+                return self[self.names == item][0]
+            elif item in self.short_names:
+                return self[self.short_names == item][0]
+            else:
+                raise ValueError('If you provide a `str` to `__getitem__`, it must be a valid `name` or `short_name` attribute')
+        return super().__getitem__(item)
+
+    @property
+    def names(self):
+        return np.array([prod.name for prod in self])
+
+    @property
+    def short_names(self):
+        return np.array([prod.short_name for prod in self])
+
 class CoolingProfiles(Profiles):
     _constructor = Cooling
 
+    def __new__(cls, df, products, **units):
+        cls.products = products
+        obj = super().__new__(cls, df, **units)
+        return obj
+
+    def __array_finalize__(self, obj):
+        super().__array_finalize__(obj)
+        self.products = getattr(obj, 'products', None)
+    
+    @staticmethod
+    def _construct_obj(cls, kws, **units):
+        kws = cls._convert_units(cls, kws, **units)    
+        kws['product'] = cls.products[kws['product']]
+        return cls._constructor(**kws)
+    
     def __repr__(self):
         joined = ', '.join([s.name for s in self])
         return f'CoolingProfiles([{joined}])'
@@ -681,6 +808,10 @@ class MiningProfiles(Profiles):
     @property
     def is_operating(self):
         return np.array([p.miner.operating for p in self])
+
+    @property
+    def pues(self):
+        return np.array([p.cooling.pue for p in self])
 
     def operating(self):
         return self[self.is_operating]

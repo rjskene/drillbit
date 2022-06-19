@@ -2,13 +2,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
+from btc.units import HashRate
+
 from bitcoin.style import grc_style
 from bitcoin.charts.charts import render, PLOT_KWARGS
+
+newcolors = np.vstack((grc_style.reds(size=128), grc_style.blues(size=128, with_alpha=True)))
+grccmp = ListedColormap(newcolors, name='GRCMap')
 
 def env_sim_pre_processing(State):
     rev = State.minestats.by_lineitem('rev', how='frame').T.resample('2W').sum().T
     cogs = State.minestats.by_lineitem('energy_exp', how='frame').T.resample('2W').sum().T
     gp = State.minestats.by_lineitem('gp', how='frame').T.resample('2W').sum().T
+    hr = State.minestats.by_lineitem('hr', how='frame').T.resample('2W').mean().T
     gm = gp / rev
     operating = ~(cogs == 0)
 
@@ -21,18 +27,13 @@ def env_sim_pre_processing(State):
     halvings = State.block_sched.reward[State.block_sched.reward.shift(1) != State.block_sched.reward].iloc[1:]
     halve_ticks = op.index.get_indexer(halvings.index.asfreq('2W'), method='nearest')
 
-    return op, count, gm, halve_ticks
+    return op, count, gm, halve_ticks, hr
 
-def chart_operational_mines(op, halves, ws, parent_path):
-    fig, ax = plt.subplots(figsize=(16,8), **{k:v for k, v in PLOT_KWARGS.items() if k not in ['figsize']})
-
-    grcmap = ListedColormap([(1,1,1,1), grc_style.blue.hex_to_rgb(as_array=True, normed=True)])
-    im = ax.imshow(op.T, cmap=grcmap, aspect='auto')
-
+def axis_formats(ax, values, halves):
     xticks = ax.get_xticks().astype(int)
-    yticks = np.arange(op.shape[1])
-    ax.set_xticks(xticks[1:-1], labels=op.index.strftime('%Y-%b')[xticks[1:-1]])
-    ax.set_yticks(yticks, minor=False, labels=op.columns)
+    yticks = np.arange(values.shape[0])
+    ax.set_xticks(xticks[1:-1], labels=values.T.index.strftime('%Y-%b')[xticks[1:-1]])
+    ax.set_yticks(yticks, minor=False, labels=values.index)
     ax.set_yticks(yticks + .5, minor=True)
 
     halve_lines = ax.vlines(halves, yticks[0], yticks[-1], colors=grc_style.green.hash, ls='--', lw=2, label='Halving')
@@ -42,6 +43,27 @@ def chart_operational_mines(op, halves, ws, parent_path):
 
     ax.spines[:].set_visible(False)
     ax.legend(loc='best', framealpha=0.5)
+
+def add_cbar(ax, im, hash_rate=False):
+    cbar_kw = {}
+    cbarlabel = ''
+
+    cbar = ax.figure.colorbar(im, ax=ax, fraction=.015, **cbar_kw)
+    cbar_tix = cbar.ax.get_yticks()
+    if hash_rate:
+        yticks = [HashRate(y).__repr__() for y in cbar_tix[1:-1]]
+    else:
+        yticks = [f'{y:.0%}' for y in cbar_tix[1:-1]]
+    cbar.ax.set_yticks(cbar_tix[1:-1], labels=yticks)  # vertically oriented colorbar
+    cbar.ax.set_ylabel(cbarlabel, rotation=-90, va="bottom")
+
+def chart_operational_mines(op, halves, ws, parent_path):
+    fig, ax = plt.subplots(figsize=(16,8), **{k:v for k, v in PLOT_KWARGS.items() if k not in ['figsize']})
+
+    grcmap = ListedColormap([(1,1,1,1), grc_style.blue.hex_to_rgb(as_array=True, normed=True)])
+    im = ax.imshow(op.T, cmap=grcmap, aspect='auto')
+
+    axis_formats(ax, op.T, halves)
     ax.set_title('Mine Operation')
 
     render(ws, fig, parent_path, 'fees', ws.name + ' Historical Fee')
@@ -59,31 +81,29 @@ def mine_gross_margin(gm, halves, ws, parent_path):
     fig, ax = plt.subplots(figsize=(16,8), **{k:v for k, v in PLOT_KWARGS.items() if k not in ['figsize']})
 
     newcolors = np.vstack((grc_style.reds(size=128), grc_style.blues(size=128, with_alpha=True)))
-    newcmp = ListedColormap(newcolors, name='GRCMap')
+    grccmp = ListedColormap(newcolors, name='GRCMap')
 
-    im = ax.imshow(gm, cmap=newcmp, aspect='auto')
+    im = ax.imshow(gm, cmap=grccmp, aspect='auto')
 
-    xticks = ax.get_xticks().astype(int)
-    yticks = np.arange(gm.shape[0])
-    ax.set_xticks(xticks[1:-1], labels=gm.T.index.strftime('%Y-%b')[xticks[1:-1]])
-    ax.set_yticks(yticks, minor=False, labels=gm.index)
-    ax.set_yticks(yticks + .5, minor=True)
-
-    halve_lines = ax.vlines(halves, yticks[0], yticks[-1], colors=grc_style.green.hash, ls='--', lw=2, label='Halving')
-
-    ax.tick_params(axis='y', which='both', width=0)
-    ax.grid(axis='y', which="minor", color="w", linestyle='-', linewidth=2)
-
-    cbar_kw = {}
-    cbarlabel = ''
-
-    cbar = ax.figure.colorbar(im, ax=ax, fraction=.015, **cbar_kw)
-    cbar_tix = cbar.ax.get_yticks()
-    cbar.ax.set_yticks(cbar_tix[1:-1], labels=[f'{y:.0%}' for y in cbar_tix[1:-1]])  # vertically oriented colorbar
-    cbar.ax.set_ylabel(cbarlabel, rotation=-90, va="bottom")
-
-    ax.spines[:].set_visible(False)
-    ax.legend(loc='best', framealpha=0.5)
+    axis_formats(ax, gm, halves)
+    add_cbar(ax, im)
     ax.set_title('Mine Gross Margin')
 
     render(ws, fig, parent_path, 'mine_gm', ws.name + ' Mine Level Gross Margin')
+
+def mine_hash_rate(hr, halves, ws, parent_path, save=True):
+    fig, ax = plt.subplots(figsize=(16,8), **{k:v for k, v in PLOT_KWARGS.items() if k not in ['figsize']})
+
+    newcolors = np.vstack((grc_style.blues(size=128*2, with_alpha=True)))
+    grccmp = ListedColormap(newcolors, name='GRCMap')
+
+    hr = hr.where(hr != 0, np.nan)
+    im = ax.imshow(hr, cmap=grccmp, aspect='auto')
+
+    axis_formats(ax, hr, halves)
+    add_cbar(ax, im, hash_rate=True)
+
+    ax.set_title('Mine Hash Rate')
+
+    if save:
+        render(ws, fig, parent_path, 'mine_hr', ws.name + ' Mine Level Hash Rate')

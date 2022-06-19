@@ -60,7 +60,7 @@ class ProjectTemplate:
 
         stat.istat.add_account(miner_amort(mine, periods=stat.periods), name='Miner Amortization', short_name='miner_amort')
         stat.istat.add_account(amort_sched(mine.build_cost, 1, mine.property_amort, mine.implement.start_in_blocks(), periods=stat.periods), name='Building Amortization', short_name='build_amort')
-        stat.istat.add_account(amort_sched(mine.cooling.capex, mine.power, mine.cooling.amort, mine.implement.start_in_blocks(), periods=stat.periods), name='Cooling Amortization', short_name='cool_amort')
+        stat.istat.add_account(amort_sched(mine.cost_of_cooling, 1, mine.cooling.amort, mine.implement.start_in_blocks(), periods=stat.periods), name='Cooling Amortization', short_name='cool_amort')
 
         stat.istat.add_account(fs.arr.add(stat.miner_amort, stat.build_amort, stat.cool_amort), name='Depreciation for Taxes', short_name='tax_depn')
 
@@ -83,7 +83,7 @@ class ProjectTemplate:
 
 class ROITemplate:
     def __new__(self, stat, mine):
-        resamp = stat.istat.resample('M').sum(last='btc_value_held')
+        resamp = stat.istat.resample('M').sum(last=['btc_held', 'btc_value_held'])
         roi_periods = pd.period_range(end=resamp.periods[-1], periods=resamp.periods.size + 1, freq=resamp.periods.freq)
 
         roi = fs.FinancialStatement(name='ROI', periods=roi_periods)
@@ -93,6 +93,9 @@ class ROITemplate:
 
         inflows = np.zeros(roi_periods.size)
         inflows[1:] = resamp.op_flow_sold.values
+
+        btc = np.zeros(roi_periods.size)
+        btc[1:] = resamp.btc_held.values
 
         cum_btc = np.zeros(roi_periods.size)
         held_delta = np.zeros(roi_periods.size)
@@ -104,6 +107,7 @@ class ROITemplate:
         roi.add_account(outlays, name='Cash Outlays', short_name='cash_out')
         roi.add_account(held_delta, name='Operating Cash Flow, held', short_name='op_flow_held')
         roi.add_account(inflows, name='Operating Cash Flow, sold', short_name='op_flow_sold')
+        roi.add_account(btc, name='BTC Held', short_name='btc_held', hide=True)
         roi.add_account(cum_btc, name='Cumulative BTC Value, held', short_name='cum_btc_value_held')
 
         with roi.add_metrics() as am:
@@ -118,8 +122,15 @@ class ROITemplate:
         return roi
 
 class ProjectStats(PoolStats):
-    def __new__(cls, mines, periods, **kwargs):
-        minerstats = [ProjectTemplate(p, periods=periods, no_model=True, **kwargs) for p in mines]
+    def __new__(cls, mines, periods, pbar=None, **kwargs):
+        minerstats = []
+        
+        for mine in mines:
+            minerstat = ProjectTemplate(mine, periods=periods, no_model=True, **kwargs)
+            minerstats.append(minerstat)
+            if pbar is not None:
+                pbar.update(1)
+
         assert np.all(minerstats[0].lineitems.short_names == [s.lineitems.short_names for s in minerstats])
         
         obj = np.asarray([o for o in minerstats], dtype='object').view(cls)
@@ -134,10 +145,12 @@ class ProjectStats(PoolStats):
         rois = [mstat.roi for mstat in self[has_roi]]
         return ROIS(rois, self.mines[has_roi])
 
-    def finalize(self, env):
+    def finalize(self, env, pbar=None):
         for mine, projstat in self.items():
             ProjectTemplate.finalize(projstat, mine, env)
-
+            if pbar:
+                pbar.update()
+                
 class ROIS(ProjectStats):
     def __new__(cls, rois, mines):
         obj = np.asarray([o for o in rois], dtype='object').view(cls)
@@ -148,6 +161,18 @@ class ROIS(ProjectStats):
     def __array_finalize__(self, obj):
         if obj is None: return
         self.mines = getattr(obj, 'mines', None)
+
+    @property
+    def btc_held(self):
+        return [roi.btc_held[-1] for roi in self]
+
+    @property
+    def op_flow_sold(self):
+        return [roi.op_flow_sold.sum() for roi in self]
+
+    @property
+    def op_flow_held(self):
+        return [roi.op_flow_held.sum() for roi in self]
 
     @property
     def total_cash_sold(self):
@@ -198,17 +223,21 @@ class ROIS(ProjectStats):
 
     def summary(self):
         return pd.DataFrame([
-            self.total_cash_sold,
+            self.btc_held,
+            self.op_flow_held,
+            # self.total_cash_sold,
             self.total_cash_held,
-            self.rois_sold,
+            # self.rois_sold,
             self.rois_held,
             self.three_yr_irr,
             self.five_yr_irr,
             self.terminal_irr,
             self.breakevens,
             ], index=[
-                'Net Cash, sold', 'Net Cash, held', 
-                'ROI, sold', 'ROI, held',
+                'BTC, held', 
+                'Net Cash Flow, held',
+                'Net Gain, held', 
+                'ROI, held',
                 'IRR 3-year, held', 'IRR 5-year held', f'IRR terminal, held',
                 'Breakeven'
             ],

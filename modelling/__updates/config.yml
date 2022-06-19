@@ -31,13 +31,8 @@ CHECKLIST_CELLS:
     block_sched: B13
     btc_price: B14
     fees: B15
-COOLING_PRODUCTS:
-    data: 'cooling/products.xlsx'
-    detail: 'A2:B7'
-    components: 'D2:G6'
 LOAD_CELLS:
     pools: P2
     miners: L2
 CHARTS:
     env: Mining Environment
-POOLS_ONLY: True

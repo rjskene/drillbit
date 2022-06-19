@@ -42,8 +42,15 @@ class MineTemplate:
         stat.istat.add_account(fs.arr.divide(stat.gp, stat.rev), name='Gross Margin')
 
 class MineStats(np.ndarray):
-    def __new__(cls, mines, miner_energy, hashes, periods, **kwargs):
-        minerstats = [MineTemplate(m, e, h, periods=periods, no_model=True, **kwargs) for m, e, h in zip(mines, miner_energy, hashes)]
+    def __new__(cls, mines, miner_energy, hashes, periods, pbar=None, **kwargs):
+        minerstats = []
+        for m, e, h in zip(mines, miner_energy, hashes):
+            minerstat = MineTemplate(m, e, h, periods=periods, no_model=True, **kwargs)
+            minerstats.append(minerstat)
+            if pbar is not None:
+                pbar.update(1)
+
+        # minerstats = [MineTemplate(m, e, h, periods=periods, no_model=True, **kwargs) for m, e, h in zip(mines, miner_energy, hashes)]
         assert np.all(minerstats[0].lineitems.short_names == [s.lineitems.short_names for s in minerstats])
         
         obj = np.asarray([o for o in minerstats], dtype='object').view(cls)
@@ -112,10 +119,12 @@ class MineStats(np.ndarray):
         else:
             raise
 
-    def finalize(self, env, network_hashes):
+    def finalize(self, env, network_hashes, pbar=None):
         env.add_account(network_hashes, name='Network Hashes', short_name='net_hashes')
         env.add_account(expected_difficulty(env.net_hashes), name='Difficulty')
         env.add_account(hashes_to_hash_rate(env.net_hashes), name='Network Hash Rate', short_name='net_hr')
 
         for mine, minestat in self.items():
             MineTemplate.finalize(minestat, env, mine)
+            if pbar:
+                pbar.update()
