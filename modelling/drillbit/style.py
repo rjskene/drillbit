@@ -1,9 +1,11 @@
 from collections import UserString
 import numpy as np
 
-import matplotlib.ticker as mticks
 import matplotlib as mpl
 from matplotlib import cm
+import matplotlib.colors as mcolors
+import matplotlib.ticker as mticks
+
 from cycler import cycler
 
 class ColorStr(UserString):
@@ -55,6 +57,11 @@ class GRCStyle:
     @property
     def _colors(self):
         return [self.blue, self.lblue, self.vlblue, self.vvlblue, self.green, self.lgreen, self.vlgreen, self.vvlgreen]
+
+    @property
+    def heatcmap(self):
+        newcolors = np.vstack((grc_style.reds(size=128), grc_style.blues(size=128, with_alpha=True)))
+        return mcolors.ListedColormap(newcolors, name='GRCHeatMap')
 
     def _color_array(self, lcolor, rcolor, size=256, normed=True, with_alpha=False):
         arr = np.linspace(

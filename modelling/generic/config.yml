@@ -1,5 +1,5 @@
 WORKSHEETS:
-    meta: BTC Meta
+    meta: Simulator
     block_sched: Block Schedule
     btc_price: BTC Projection
     fees: Fee Projection
@@ -7,6 +7,8 @@ WORKSHEETS:
     projects: Projects
     miners: Miners
     cooling: Cooling
+    envs: Simulator
+    minenv: Mining Environment
     proj_comp: Project Comparison
     proj_temp: __ProjectTemplate
 TABLES:
@@ -23,7 +25,8 @@ TABLES:
     btc_price_inputs: B2:B5
     fees_inputs: B2:B5
 BUTTONS:
-    sim: SimulateMinesButton
+    env: SimulateEnvButton
+    proj: SimulateProjectsButton
     block_sched: ScheduleButton
     btc_price: BTCForecastButton
     fees: FeeForecastButton
@@ -31,13 +34,8 @@ CHECKLIST_CELLS:
     block_sched: B13
     btc_price: B14
     fees: B15
-COOLING_PRODUCTS:
-    data: 'cooling/products.xlsx'
-    detail: 'A2:B7'
-    components: 'D2:G6'
 LOAD_CELLS:
-    pools: P2
     miners: L2
-CHARTS:
-    env: Mining Environment
-POOLS_ONLY: True
+    pools: P2
+    projects: B17
+    envs: D13

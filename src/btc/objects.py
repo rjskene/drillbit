@@ -605,10 +605,13 @@ class Profiles(np.ndarray):
 
         obj = np.asarray([o for o in objs], dtype='object').view(cls)
         
-        if 'short_name' not in df.columns:
+        if 'short_name' not in df.columns and df.index.name != 'short_name':
             df['short_name'] = [o.short_name for o in objs]
         df = df.reset_index().set_index('short_name')
-        
+
+        if 'index' not in df.columns: # if the DF is passed with short_name, then an index column needs to be added
+            df.loc[:, 'index'] = np.arange(0, df.shape[0])
+
         obj.df = df
         obj._provided_units = units
 
@@ -773,7 +776,7 @@ class MiningProfiles(Profiles):
     def __add__(self, item):
         df = pd.concat((self.df, item.df))
         df = df.reset_index().drop('index', axis=1)
-        assert self._provided_units == item._provided_units
+        assert self._provided_units == item._provided_units, f'{self._provided_units} != {item._provided_units}'
         assert self.miners is item.miners
         assert self.coolers is item.coolers
         return MiningProfiles(df, miners=self.miners, coolers=self.coolers, **self._provided_units)
@@ -819,12 +822,14 @@ class MiningProfiles(Profiles):
     def summary(self):
         spacer = np.zeros(self.size)*np.nan
         summary = pd.DataFrame([
-            self.n_miners,
-            self.hash_rate,
             spacer,
+            self.power_for_miners + self.power_for_cooling,
             self.power_for_miners,
             self.power_for_cooling,
-            self.power_for_miners + self.power_for_cooling,
+            spacer,
+            self.n_miners,
+            self.hash_rate,
+            self.hash_rate / self.n_miners,
             spacer,
             self.cost_of_miners,
             self.cost_of_cooling,
@@ -834,9 +839,10 @@ class MiningProfiles(Profiles):
             self.footprint,
             self.annual_property_taxes,
             ], index=[
-                'Number of Miners', 'Peak Hash Rate', 
                 'Power',
-                'Power for Miners', 'Power for Cooling', 'Total Power',
+                'Total Power', 'Power for Miners', 'Power for Cooling',
+                'Performance',
+                'Number of Miners', 'Peak Hash Rate', 'Hash Rate per Miner',
                 'Capital',
                 'Cost of Miners', 'Cost of Cooling ', 'Cost of Building', 'Total Capital Cost', 
                 'Other',

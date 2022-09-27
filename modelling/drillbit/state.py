@@ -1,13 +1,17 @@
 from pathlib import Path
+import datetime as dt
 import numpy as np
 import pandas as pd
 
+from tqdm.auto import tqdm
+import dill as pickle
 import yaml
 import xlwings as xw
 
 from btc.objects import CoolingProduct, CoolingProducts, CoolingProfiles, Miners, MiningProfiles
 from btc.meta import init_meta
 
+from .helpers import fs_read_pickle, fs_write_pickle
 from .excel import DataFrameDropna
 
 def create_product(xl):
@@ -27,6 +31,18 @@ def create_product(xl):
     return CoolingProduct(**details.to_dict())
 
 class SheetState:
+    LOAD_ATTRS  = dict(
+        fstats = ['env'],
+        objs = [
+            'cooling_products', 
+            'block_sched', 
+            'periods',
+            'btc_price', 
+            'traxn_fees',
+        ],
+        dfs = ['miners', 'coolers', 'pools'],
+    )
+
     def __init__(self, exec_file, BTC=None, config=None):
         wb_name = exec_file.split('\\')[-1].split('.')[0] # get file name; must correspond to spreadsheet
 
@@ -51,13 +67,13 @@ class SheetState:
 
     def get_config(self):
         config_xl = self.wb.sheets['config'].range('A1').expand().options(pd.DataFrame, header=False).value.loc[:, 0]
-        config_xl.index = config_xl.index.str.replace(' ', '_').str.lower()
+        config_xl.index = config_xl.index.str.replace(' ', '_')
         return config_xl.to_dict()
 
     def update_config(self):
         for k, v in self.get_config().items():
             setattr(self, k, v)
-        
+
     @property
     def WB_NAME(self):
         return self.wb.name.split('.')[0]
@@ -68,7 +84,17 @@ class SheetState:
 
     @property
     def datadir(self):
-        return self.parent_path.parent / self.data_path
+        if hasattr(self, 'data_path'):
+            return self.parent_path.parent / self.data_path
+        else:
+            return self.parent_path.parent / 'data'
+
+    @property
+    def mines(self):
+        if hasattr(self, 'projects'):
+            return self.pools + self.projects
+        else:
+            return self.pools
 
     def get_ws(self, ws):
         return self.wb.sheets[self.WS[ws]]
@@ -112,8 +138,12 @@ class SheetState:
     def update_btc(self):
         try:
             self.BTC = init_meta()
+            date = dt.datetime.now().strftime('%Y-%m-%d')
+            with open(self.datadir / 'meta' / f'meta-{date}.pkl', 'wb') as file_:
+                pickle.dump(self.BTC, file_)
         except Exception as e:
-            import dill as pickle
+            print ('There was an error updating the bitcoin meta data. Loading from prior version instead.', end='\n')
+            print (repr(e))
             with open(self.datadir / 'meta' / 'meta-16-6-22.pkl', 'rb') as file_:
                 self.BTC = pickle.load(file_)
 
@@ -145,19 +175,13 @@ class SheetState:
         
         return obj
 
-    def update_mines(self):
-        if 'mines' in self.WS:
-            obj = self.get_ws('mines').range(f'{self.TABLES["mines"]}[[#All]]').options(DataFrameDropna, index=False).value
-            self.mines = MiningProfiles(self.clean_mine_profiles(obj), miners=self.miners, coolers=self.coolers, power='GW', opex_cost='GW', density='kW')
-        else:
-            if 'pools' in self.WS and 'projects' and self.WS:
-                obj1 = self.get_ws('pools').range(f'{self.TABLES["pools"]}[[#All]]').options(DataFrameDropna, index=False).value
-                obj2 = self.get_ws('projects').range(f'{self.TABLES["projects"]}[[#All]]').options(DataFrameDropna, index=False).value
-                pools = MiningProfiles(self.clean_mine_profiles(obj1), miners=self.miners, coolers=self.coolers, power='GW', opex_cost='GW', density='kW')
-                projects = MiningProfiles(self.clean_mine_profiles(obj2), miners=self.miners, coolers=self.coolers, power='GW', opex_cost='GW', density='kW')
-                self.mines = pools + projects
-            else:
-                raise ValueError('You do not have the required mine sheets.')
+    def update_pools(self):
+        obj = self.get_ws('pools').range(f'{self.TABLES["pools"]}[[#All]]').options(DataFrameDropna, index=False).value
+        self.pools = MiningProfiles(self.clean_mine_profiles(obj), miners=self.miners, coolers=self.coolers, power='GW', opex_cost='GW', density='kW')
+
+    def update_projects(self):
+        obj = self.get_ws('projects').range(f'{self.TABLES["projects"]}[[#All]]').options(DataFrameDropna, index=False).value
+        self.projects = MiningProfiles(self.clean_mine_profiles(obj), miners=self.miners, coolers=self.coolers, power='GW', opex_cost='GW', density='kW')
 
     def set_block_sched(self, block_sched):
         self.block_sched = block_sched
@@ -222,9 +246,12 @@ class SheetState:
 
         return self.traxn_fees
 
-    def implement_mines(self):
-        self.mines.implement(self.periods.size)
+    def implement_pools(self):
+        self.pools.implement(self.periods.size)
         self.set_implemented(True)
+
+    def implement_projects(self):
+        self.projects.implement(self.periods.size)
 
     def wipe(self):
         if hasattr(self, 'projstats'):
@@ -235,3 +262,81 @@ class SheetState:
 
         import gc
         gc.collect()
+
+    def load_environment(self, dirname):
+        dirpath = self.datadir / 'envs' / dirname
+        metapath = dirpath / 'meta'
+
+        for k, attrs_to_load in self.LOAD_ATTRS.items():
+            for attr in attrs_to_load:
+                if k == 'fstats':
+                    obj = fs_read_pickle(metapath / f'{attr}.pkl')
+                else:
+                    with open(metapath / f'{attr}.pkl', 'rb') as file1:
+                        obj = pickle.load(file1)
+                        if k == 'dfs':
+                            with open(metapath / f'{attr}_units.pkl', 'rb') as file2:
+                                units = pickle.load(file2) # each Profiles object must get units keywords to remain consistent
+                            if attr == 'miners':  
+                                obj = Miners(obj.drop(columns='index'), **units)
+                            elif attr == 'coolers':
+                                obj = CoolingProfiles(obj.drop(columns='index'), self.cooling_products, **units) # cooling_product should have already been loaded!
+                            elif attr == 'pools':  
+                                obj = MiningProfiles(obj.drop(columns='index'), miners=self.miners, coolers=self.coolers, **units)
+
+                setattr(self, attr, obj)
+
+    def save_environment(self, dirname):
+        dirname += ' ' + dt.datetime.now().strftime('%y-%m-%d-%H-%M')
+        dirpath = self.datadir / 'envs' / dirname
+        if not dirpath.exists():
+            dirpath.mkdir()
+
+        metapath = dirpath / 'meta'
+        if not metapath.exists():
+            metapath.mkdir()
+
+        assert not len(self.minestats[0].G.filter_graph_by_attribute('hidden', True).nodes)
+
+        with tqdm(total=len(self.LOAD_ATTRS['dfs']) + len(self.LOAD_ATTRS['objs']) + len(self.LOAD_ATTRS['fstats']) + self.minestats.size + 1) as pbar:
+            for fsstr in self.LOAD_ATTRS['fstats']:
+                fs_write_pickle(getattr(self, fsstr), metapath / 'env.pkl')
+                
+            pbar.update(1)
+                
+            for dfstr in self.LOAD_ATTRS['dfs']:
+                with open(metapath / f'{dfstr}.pkl', 'wb') as file_:
+                    pickle.dump(getattr(self, dfstr).df, file_)
+                
+                with open(metapath / f'{dfstr}_units.pkl', 'wb') as file_:
+                    pickle.dump(getattr(self, dfstr)._provided_units, file_) # All sublcasses of Profiles will have a `_provided_units` attr
+                
+                pbar.update(1)
+
+            for objstr in self.LOAD_ATTRS['objs']:
+                with open(metapath / f'{objstr}.pkl', 'wb') as file_:
+                    pickle.dump(getattr(self, objstr), file_)
+
+                pbar.update(1)
+
+            envs = np.zeros((self.minestats.size, *self.minestats[0].env.shape))
+            stats = np.zeros((self.minestats.size, *self.minestats[0].istat.shape))
+            for i, mstat in enumerate(self.minestats):
+                envs[i] = mstat.env.to_frame().values
+                stats[i] = mstat.istat.to_frame().values
+
+                pbar.update(1)
+
+            with open(dirpath / 'stats.pkl', 'wb') as file_:
+                pickle.dump(stats, file_)
+
+            with open(dirpath / 'envs.pkl', 'wb') as file_:
+                pickle.dump(envs, file_)
+
+            with open(dirpath / 'sample_stats_frame.pkl', 'wb') as file_:
+                pickle.dump(self.minestats[0].istat.to_frame(), file_)
+
+            with open(dirpath / 'sample_envs_frame.pkl', 'wb') as file_:
+                pickle.dump(self.minestats[0].env.to_frame(), file_)
+                    
+            pbar.update(1)

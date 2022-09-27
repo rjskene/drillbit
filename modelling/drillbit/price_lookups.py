@@ -36,6 +36,11 @@ def lookup_price(name, manufacturer, hr, pluses):
 
     except IndexError as e:
         return 'Not Found'
+    except AttributeError as e:
+        if "'NoneType' object has no attribute 'find_all'" in str(e):
+            return 'Not Found'
+        else:
+            raise e
 
 @xw.sub
 def price_lookup():
