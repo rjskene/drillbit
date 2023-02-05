@@ -3,7 +3,7 @@ import pandas as pd
 
 from tqdm.auto import trange
 
-from .funcs import cooling_energy
+from .mining import cooling_energy
 
 from numpy.random import default_rng
 np_rand = default_rng()

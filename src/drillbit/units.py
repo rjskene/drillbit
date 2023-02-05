@@ -249,7 +249,7 @@ class Power(MultiUnitMixin, Units, PowerConversions):
         return 'J' in self.magkey.index
 
     def consumption(self, **duration):
-        from .funcs import consumption_in_Wh
+        from .mining import consumption_in_Wh
         return consumption_in_Wh(self, **duration)
 
     def consumption_per_block(self):

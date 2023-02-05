@@ -4,8 +4,7 @@ import pandas as pd
 
 import finstat as fs
 
-from .meta import MiningMixin
-from .funcs import consumption_in_Wh
+from .mining import MiningMixin, consumption_in_Wh
 from .units import Power, Energy, HashRate, HashPrice, PowerPrice, \
     EnergyPrice, Efficiency, Density, Area, PropertyPrice
 
