@@ -7,6 +7,7 @@ __all__ = [
     'EnergyPrice', 'PowerPrice', 'HashPrice', 'PropertyPrice',
 ]
 
+
 class MagnitudeTable:
     MAGNITUDES = {
         'base': {'magnitude': 0, 'abbr': ''},
@@ -102,6 +103,16 @@ class BaseUnits(float):
     
     def subtract(self, value):
         res = super().__sub__(value)
+        res /= 10**self.magnitude
+        return self.__class__(res, **self.__dict__)
+
+    def __mul__(self, value):
+        res = super().__mul__(value)
+        res /= 10**self.magnitude
+        return self.__class__(res, **self.__dict__)
+
+    def __rmul__(self, value):
+        res = super().__mul__(value)
         res /= 10**self.magnitude
         return self.__class__(res, **self.__dict__)
 
