@@ -300,9 +300,13 @@ class HashRate(AbstractBaseUnit):
 
         if isinstance(value, Efficiency):
             return Power(res, 'W')
+        elif isinstance(value, Time):
+            res = Hashes(res)
+
+        return res
 
     def hashes_per_block(self):
-        return Hashes(self * 60 * 10)
+        return Hashes(self *  60 * 10)
 
     def hashes_per_day(self):
         return Hashes(self * 60 * 10 * 6 * 24)
@@ -329,12 +333,12 @@ class Power(MultiUnitMixin, AbstractBaseUnit, PowerConversions):
 
         return res
 
-#     def consumption(self, **duration):
-#         from .mining import consumption_in_Wh
-#         return consumption_in_Wh(self, **duration)
+    def consumption(self, **duration):
+        from .mining import consumption_in_Wh
+        return consumption_in_Wh(self, **duration)
 
-#     def consumption_per_block(self):
-#         return self.consumption(minutes=10)
+    def consumption_per_block(self):
+        return self.consumption(minutes=10)
 
 class Energy(MultiUnitMixin, AbstractBaseUnit, EnergyConversions):
     MAGNITUDES_W = MagnitudeTable('Wh')
@@ -357,6 +361,9 @@ class Efficiency(MultiUnitMixin, AbstractBaseUnit, PowerConversions):
             return Power(res, units='W')
 
         return res
+
+    def hash_rate(self, power):
+        return HashRate(power / self)
 
 class Density(AbstractBaseUnit):
     MAGNITUDES = MagnitudeTable('{}W / sf')
@@ -385,28 +392,28 @@ class HashPrice(AbstractBaseUnit):
 class PropertyPrice(AbstractBaseUnit):
     MAGNITUDES = MagnitudeTable('$ / {}sf', inverse=True)
 
-# class UnitsArray(np.ndarray):
-#     """
-#     A numpy array of Units objects
-#     """
+class UnitsArray(np.ndarray):
+    """
+    A numpy array of Units objects
+    """
 
-#     def __new__(cls, elements):
-#         obj = np.asarray([a for a in elements], dtype='object').view(cls)
-#         return obj
+    def __new__(cls, elements):
+        obj = np.asarray([a for a in elements], dtype='object').view(cls)
+        return obj
     
-#     def __array_finalize__(self, obj):
-#         if obj is None: return
+    def __array_finalize__(self, obj):
+        if obj is None: return
 
-#     def __repr__(self):
-#         joined = ', '.join([s.__repr__() for s in self])
-#         return f'UnitsArray([{joined}])'
+    def __repr__(self):
+        joined = ', '.join([s.__repr__() for s in self])
+        return f'UnitsArray([{joined}])'
 
-#     @property
-#     def values(self):
-#         return np.array([s.value for s in self])
+    @property
+    def values(self):
+        return np.array([s.value for s in self])
 
-#     def in_joules(self):
-#         return UnitsArray([s.in_joules() for s in self])
+    def in_joules(self):
+        return UnitsArray([s.in_joules() for s in self])
 
-#     def in_watts(self):
-#         return UnitsArray([s.in_watts() for s in self])
+    def in_watts(self):
+        return UnitsArray([s.in_watts() for s in self])

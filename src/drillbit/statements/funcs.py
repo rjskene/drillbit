@@ -1,10 +1,10 @@
 import numpy as np
 import finstat as fs
-from btc.funcs import mining_rate
+from ..mining import mining_rate
 
 @fs.statfunc
 def expected_difficulty(hashes):
-    from btc.funcs import expected_difficulty
+    from ..mining import expected_difficulty
     return expected_difficulty(hashes)
 
 @fs.statfunc
@@ -24,7 +24,7 @@ def btc_mined(difficulty, hash_rate, rewards, periods):
     return np.array([mining_rate(diff, hash_rate, reward, days) for diff, reward, days in np.vstack((difficulty, rewards, periods.days_in_month)).T])
 
 @fs.statfunc
-def cooling_energy(energy, pue):
+def total_energy(energy, pue):
     return energy * (pue - 1)
 
 @fs.statfunc

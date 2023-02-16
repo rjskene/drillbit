@@ -47,7 +47,6 @@ class Rig:
     power: Power
     hash_rate: HashRate
     buffer: float=0
-    quantity: int=0
 
     def __post_init__(self):
         if not isinstance(self.power, Power):
@@ -107,38 +106,90 @@ class Product:
         return self.price * self.quantity
 
 @dataclass
-class Cooler(Product):
+class Cooling(Product):
+    """
+    Products that directly cool a mining rig, such as immersion tank or fans
+    """
+    number_of_rigs: float
+
+@dataclass
+class HeatRejection(Product):
     """Object for managing coolers properties"""
     curve: tuple[float, float]
 
     def capacity_at_temp(self, temp):
         return Power(temp * self.curve[0] + self.curve[1])
 
-class RigOperator:
-    def __init__(self, rig, overclock=1):
-        self.rig = rig
-        self.overclock = overclock
+class ProductOperator:
+    PRODUCT_TYPE = 'product'
+    def __init__(self, 
+        product, 
+        quantity=0, 
+        implementation=None,
+        amortization=60,
+        ):
+        setattr(self, self.PRODUCT_TYPE, product)
+        self.quantity = quantity
+        self.implementation = implementation
+        self.amortization = amortization
+
+        for k, v in getattr(self, self.PRODUCT_TYPE).__dict__.items():
+            setattr(self, k, v)
+
+class RigOperator(ProductOperator):
+    PRODUCT_TYPE = 'rig'
+    def __init__(self, 
+        *args, 
+        overclocking=1,
+        **kwargs
+        ):
+        super().__init__(*args, **kwargs)
+        self._overclock_manager = OverClock(factor=overclocking, rig=self.rig)
+ 
+    @property
+    def OC(self):
+        return self._overclock_manager
+
+    @property
+    def schedule(self):
+        if self.implementation is None:
+            return self.quantity
+        else:
+            return self.implementation.schedule
+
+class CoolingOperator(ProductOperator):
+    PRODUCT_TYPE = 'cooling'
+
+class HeatRejectionOperator(ProductOperator):
+    PRODUCT_TYPE = 'heat_rejection'
+
+class ElectricalOperator(ProductOperator):
+    PRODUCT_TYPE = 'electrical'
 
 class OverClock:
     """
     Governor for overclocking a Rig    
     """
-    a = 2.6696 # units of 1 / TH/s
-    b = 23.33  # units of W / TH/s
+    a = 2.6696 / 1e12 # units of 1 / TH/s
+    b = 23.33 / 1e12  # units of W / TH/s
     BASERIG = Rig('Antminer', 'S19', 'Base', 'Bitmain', price=7000, power=Power(3250), hash_rate=HashRate(96, 'TH/s'))
     
-    def __init__(self, factor=0, rig=None, max_power=Power(6250), func=None):
-        self._power_factor = factor
+    def __init__(self, factor=1, rig=None, max_power=Power(6250), func=None):
+        self._factor = factor 
         self._rig = rig
         self.max_power = max_power
         self._func = func
         
-    def base_func(self, x):
-        # x = power in W
+    def base_func(self, power):
+        # power = power in W
         # converts [W / TH/s] to [W / H/s] by taking in W
         # [1 / TH/s]*[TH/s][1e12H/s] * x W [1kW / 1000W] + [W / Th/s][Th/s / 1e12H/s]
-        return ((self.a / 1e12) * x / 1000 + (self.b / 1e12)) / self.multiplier
+        return ((self.a / 1e12) * power / 1000 + (self.b / 1e12)) / self.multiplier
     
+    @property
+    def _power_factor(self):
+        return self._factor - 1
+
     @property
     def func(self):
         return self.base_func if self._func is None else self._func
@@ -151,7 +202,7 @@ class OverClock:
     def multiplier(self):
         BASERIG = object.__getattribute__(self, 'BASERIG')
         rig = object.__getattribute__(self, 'rig')
-        return BASERIG.specs.efficiency / rig.specs.efficiency
+        return BASERIG.efficiency / rig.efficiency
     
     @property
     def power_factor(self):
@@ -162,43 +213,42 @@ class OverClock:
 
     @property
     def interval(self):
-        return self.max_power - self.rig.specs.power
+        return self.max_power - self.rig.power
         
-    def power_by_factor(self, n=None):
-        if n is None:
-            n = self._power_factor
-        return Power((n * self.interval) + self.rig.specs.power)
+    def power_by_factor(self, factor=None):
+        if factor is None:
+            power_factor = self._power_factor
+        else:
+            power_factor = factor - 1
+        return Power((power_factor * self.interval) + self.rig.power)
         
     def curve(self, x=None):
         if x is None:
-            x = np.linspace(self.rig.specs.power, self.max_power, 100)
+            x = np.linspace(self.rig.power, self.max_power, 100)
         return x, self.func(x)
     
     def eff_by_power(self, x=None):
         if x is None:
-            x = self.rig.specs.power
+            x = self.rig.power
         return Efficiency(self.func(x))
     
-    def eff_by_factor(self, n=None):
-        return Efficiency(self.func(self.power_by_factor(n)))
+    def eff_by_factor(self, factor=None):
+        return Efficiency(self.func(self.power_by_factor(factor)))
     
-    def hash_rate_by_power(self, x=None):
-        if x is None:
-            x = self.rig.specs.power
-        return self.eff_by_factor(x).hash_rate(x)
-    
-    def hash_rate_by_factor(self, n=None):
-        power = self.power_by_factor(n)
-        return self.eff_by_factor(n).hash_rate(power)
+    def hash_rate_by_factor(self, factor=None):
+        power = self.power_by_factor(factor)
+        return self.eff_by_factor(factor).hash_rate(power)
 
 @dataclass
 class Project:
     capacity: Power
-    rigs: Rig
+    rigs: RigOperator
     infrastructure: list[Product]
     target_overclocking: OverClock = 1
     energy_price: EnergyPrice = 0
     target_ambient_temp: float = 95
+    pool_fees: float = 0
+    name: str = None
 
     def __post_init__(self):
         if isinstance(self.rigs, list):
@@ -217,6 +267,10 @@ class Project:
         scaler = self._get_scaler()
         scaler.assign_quantities()
         return self
+
+    @property
+    def project_pue(self):
+        return self._get_scaler().project_pue()
 
 class ProjectScaler:
     def __init__(self, project):
@@ -240,6 +294,8 @@ class ProjectScaler:
     def infrastructure_quantity(self, product):
         if hasattr(product, 'curve'):
             power_per_unit = product.capacity_at_temp(self.project.target_ambient_temp)
+        elif hasattr(product, 'number_of_rigs'):
+            power_per_unit = product.number_of_rigs * self.compute_power_per_rig()
         else:
             power_per_unit = product.power
 
