@@ -64,7 +64,7 @@ class AbstractBaseUnit(ABC, float):
                 ))
                 
             order = cls.MAGNITUDES.set_index('units').loc[units].order
-            value = cls.return_raw_value(value, order)
+            value = cls.return_value_value(value, order)
 
         return float.__new__(cls, value)
         
@@ -76,19 +76,19 @@ class AbstractBaseUnit(ABC, float):
         Override the default __repr__ method to return the value of the
         object in its most concise units.
 
-        `raw` and `magnitude` objects must be fetched via `object.__getattribute__`
+        `value` and `magnitude` objects must be fetched via `object.__getattribute__`
         to avoid infinite recursion.
 
-        Formula: the unscaled raw value is scaled to the nearest concise magnitude
+        Formula: the unscaled value value is scaled to the nearest concise magnitude
         and the units are appended to the scaled value.
 
         Returns
         -------
         str;    The value of the object in its most concise units.
         """
-        raw = object.__getattribute__(self, 'raw')
+        value = object.__getattribute__(self, 'value')
         magnitude = object.__getattribute__(self, 'magnitude')   
-        return f'{raw / (10**magnitude.order)} {magnitude.units}'
+        return f'{value / (10**magnitude.order)} {magnitude.units}'
 
     def __add__(self, value):
         res = super().__add__(value)
@@ -140,8 +140,8 @@ class AbstractBaseUnit(ABC, float):
 
         If value is negative, returns the order of the absolute value.
         """
-        if self.raw:
-            if self.raw < 0:
+        if self.value:
+            if self.value < 0:
                 return round(math.log(-self, 10),0)
             else:
                 return round(math.log(self, 10))
@@ -171,11 +171,11 @@ class AbstractBaseUnit(ABC, float):
         return self.MAGNITUDES.iloc[self._magnitude_index]
         
     @classmethod
-    def return_raw_value(cls, value, order):
+    def return_value_value(cls, value, order):
         return value * (10**order)
 
     @property
-    def raw(self):
+    def value(self):
         return self.__float__()
 
 class MultiUnitMixin:
@@ -224,13 +224,13 @@ class EnergyConversions:
         if (self.MAGNITUDES.units == 'J').any():
             warnings.warn('Units are already Joules')            
         else:
-            return self.__class__(self.raw * 60 * 60, units='J')    
+            return self.__class__(self.value * 60 * 60, units='J')    
 
     def in_watts(self):
         if (self.MAGNITUDES.units == 'Wh').any():
             warnings.warn('Units are already Watt-hours')            
         else:
-            return self.__class__(self.raw / 60 / 60, units='Wh')    
+            return self.__class__(self.value / 60 / 60, units='Wh')    
 
 class Time(float):
     def __new__(cls, *args, **kwargs):
@@ -275,7 +275,7 @@ class Time(float):
         return self.__class__(seconds=res, **self.__dict__)
 
     @property
-    def raw(self):
+    def value(self):
         return self.__float__()
 
 class Hashes(AbstractBaseUnit):

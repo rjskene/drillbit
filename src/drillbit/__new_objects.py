@@ -88,8 +88,6 @@ class Product:
     price: float
 
     def __post_init__(self):
-        self.quantity = None # allows inheritance of Product class
-
         if not isinstance(self.power, Power):
             self.power = Power(self.power)
 
@@ -248,6 +246,9 @@ class Project:
     energy_price: EnergyPrice = 0
     target_ambient_temp: float = 95
     pool_fees: float = 0
+    tax_rate: float = 0
+    opex: float = 0
+    property_tax: float = 0
     name: str = None
 
     def __post_init__(self):
@@ -269,8 +270,20 @@ class Project:
         return self
 
     @property
-    def project_pue(self):
+    def pue(self):
         return self._get_scaler().project_pue()
+
+    @property
+    def power_per_rig(self):
+        return self.rigs.OC.power_by_factor()
+
+    @property
+    def hash_rate_per_rig(self):
+        return self.rigs.OC.hash_rate_by_factor()
+
+    @property
+    def consumption_per_rig_per_block(self):
+        return self.power_per_rig.consumption_per_block()
 
 class ProjectScaler:
     def __init__(self, project):
