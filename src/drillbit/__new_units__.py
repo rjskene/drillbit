@@ -32,7 +32,6 @@ class MagnitudeTable:
     def make(cls, units, inverse):
         df = pd.DataFrame(cls.MAGNITUDES).T
 
-
         units = units if '{}' in units else '{}' + units
         df.loc[:, 'units'] = df.abbr.apply(lambda val: units.format(val))
 
@@ -283,9 +282,10 @@ class Hashes(AbstractBaseUnit):
     
     def __truediv__(self, value):
         res = super().__truediv__(value)
-
         if isinstance(value, Time):
             res = HashRate(res)
+        elif isinstance(value, Energy):
+            res = Efficiency(res)
 
         return res
 

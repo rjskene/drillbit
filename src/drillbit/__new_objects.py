@@ -75,10 +75,6 @@ class Rig:
     def hr(self):
         return self.hash_rate
 
-    @property
-    def total_cost(self):
-        return self.price * self.quantity
-
 @dataclass
 class Product:
     """Object for managing mining rig properties"""
@@ -98,10 +94,6 @@ class Product:
             f'pue={self.pue},'
             f'price={self.price},'  
         )
-
-    @property
-    def total_cost(self):
-        return self.price * self.quantity
 
 @dataclass
 class Cooling(Product):
@@ -134,6 +126,9 @@ class ProductOperator:
         for k, v in getattr(self, self.PRODUCT_TYPE).__dict__.items():
             setattr(self, k, v)
 
+    def cost(self):
+        return self.price * self.quantity
+
 class RigOperator(ProductOperator):
     PRODUCT_TYPE = 'rig'
     def __init__(self, 
@@ -155,6 +150,10 @@ class RigOperator(ProductOperator):
         else:
             return self.implementation.schedule
 
+    @property
+    def total_hash_rate(self):
+        return self.OC.rig.hash_rate * self.schedule
+
 class CoolingOperator(ProductOperator):
     PRODUCT_TYPE = 'cooling'
 
@@ -168,8 +167,8 @@ class OverClock:
     """
     Governor for overclocking a Rig    
     """
-    a = 2.6696 / 1e12 # units of 1 / TH/s
-    b = 23.33 / 1e12  # units of W / TH/s
+    a = 2.6696 # units of 1 / TH/s
+    b = 23.33  # units of W / TH/s
     BASERIG = Rig('Antminer', 'S19', 'Base', 'Bitmain', price=7000, power=Power(3250), hash_rate=HashRate(96, 'TH/s'))
     
     def __init__(self, factor=1, rig=None, max_power=Power(6250), func=None):
@@ -274,6 +273,14 @@ class Project:
         return self._get_scaler().project_pue()
 
     @property
+    def compute_power(self):
+        return self._get_scaler().compute_power()
+
+    @property
+    def infra_power(self):
+        return self.capacity - self.compute_power
+
+    @property
     def power_per_rig(self):
         return self.rigs.OC.power_by_factor()
 
@@ -284,6 +291,21 @@ class Project:
     @property
     def consumption_per_rig_per_block(self):
         return self.power_per_rig.consumption_per_block()
+
+    def rig_cost(self):
+        return self.rigs.price * self.rigs.quantity
+
+    def infra_cost_schedule(self):
+        return {infra.name: infra.price * infra.quantity for infra in self.infrastructure}
+
+    def infra_cost(self):
+        return sum([i.price * i.quantity for i in self.infrastructure])
+
+    def building_cost(self):
+        return 0
+
+    def capital_cost(self):
+        return self.rig_cost() + self.infra_cost() + self.building_cost()
 
 class ProjectScaler:
     def __init__(self, project):

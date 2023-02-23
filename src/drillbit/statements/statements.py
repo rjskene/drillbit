@@ -5,12 +5,12 @@ import numpy_financial as npf
 
 from .funcs import total_energy, expected_difficulty, hashes_to_hash_rate, \
     hash_rate_to_hashes, win_percentage, staggered_amortize, amortize
-from ..__new_units__ import AbstractBaseUnit
+from ..__new_units__ import AbstractBaseUnit, Energy
 
 import finstat as fs
 
 def init_environment(block_schedule, price, fees, hash_rate):
-    stat = fs.FinancialStatement(name='BTC Environment', periods=block_schedule.period)
+    stat = fs.FinancialStatement(name='BTC Environment', periods=block_schedule.index)
 
     stat.add_account(block_schedule.block_id.astype('int'), name='Block ID', short_name='block_id')
     stat.add_account(block_schedule.reward, name='Block Reward', short_name='reward')
@@ -67,10 +67,10 @@ class ProjectTemplate:
         stat.env.add_account(fs.arr.multiply(project.hash_rate_per_rig.value, stat.n_miners), name='Hash Rate')
         stat.env.add_account(hash_rate_to_hashes(stat.hr), name='Hashes')
 
-        stat.env.add_account(win_percentage(stat.hashes, env.difficulty), name='Win %', short_name='win_per')
+        stat.env.add_account(win_percentage(stat.hashes, env.difficulty), name='Hash Share', short_name='hash_share')
 
-        stat.env.add_account(fs.arr.multiply(stat.win_per, env.reward), name='BTC Reward', short_name='btc_reward')
-        stat.env.add_account(fs.arr.multiply(stat.win_per, env.fees), name='Transaction Fees', short_name='traxn_fees')
+        stat.env.add_account(fs.arr.multiply(stat.hash_share, env.reward), name='BTC Reward', short_name='btc_reward')
+        stat.env.add_account(fs.arr.multiply(stat.hash_share, env.fees), name='Transaction Fees', short_name='traxn_fees')
         stat.env.add_account(fs.arr.multiply(stat.btc_reward, project.pool_fees), name='Pool Fees (\u0243)', short_name='pool_fees_in_btc')
         stat.env.add_account(fs.arr.add(stat.btc_reward, stat.traxn_fees, -stat.pool_fees_in_btc), name='BTC Mined', short_name='btc_mined')
 
@@ -136,180 +136,24 @@ class ProjectTemplate:
 
         stat.istat.add_account(fs.arr.multiply(stat.btc_held, env.btc_price), name='BTC Value, if held', short_name='btc_value_held')
 
+        roi = ROITemplate(stat, project)
+        stat.add_related(roi.short_name, roi)
+
         return stat
 
-class PoolStats(np.ndarray):
-    def __new__(cls, mines, miner_energy, hashes, periods, pbar=None, **kwargs):
-        minerstats = []
-        for m, e, h in zip(mines, miner_energy, hashes):
-            minerstat = PoolTemplate(m, e, h, periods=periods, no_model=True, **kwargs)
-            minerstats.append(minerstat)
-            if pbar is not None:
-                pbar.update(1)
-
-        # minerstats = [PoolTemplate(m, e, h, periods=periods, no_model=True, **kwargs) for m, e, h in zip(mines, miner_energy, hashes)]
-        assert np.all(minerstats[0].lineitems.short_names == [s.lineitems.short_names for s in minerstats])
-        
-        obj = np.asarray([o for o in minerstats], dtype='object').view(cls)
-        obj.mines = mines
-        obj.periods = periods
-        return obj
-    
-    def __array_finalize__(self, obj):
-        if obj is None: return
-        self.mines = getattr(obj, 'mines', None)
-        self.periods = getattr(obj, 'periods', None)
-
-    def __getattribute__(self, name):
-        names = object.__getattribute__(self, 'names')
-        short_names = object.__getattribute__(self, 'short_names')
-
-        if name == '__array_finalize__':
-            return super().__getattribute__(name)
-        else:
-            if name in names:
-                return self[name == names][0]
-            elif name in short_names:
-                return self[name == short_names][0]
-            else:
-                return super().__getattribute__(name)
-
-    @property
-    def names(self):
-        return np.array([p.name for p in self])
-
-    @property
-    def short_names(self):
-        return np.array([p.short_name for p in self])
-
-    def items(self):
-        for mine, stat in zip(self.mines, self):
-            yield mine, stat
-
-    @property
-    def is_project(self):
-        return np.array([p.is_project for p in self.mines])
-
-    @property
-    def is_pool(self):
-        return np.array([p.is_pool for p in self.mines])
-
-    @property
-    def pools(self):
-        pools = self[self.is_pool]
-        pools.mines = self.mines[self.is_pool]
-        return pools
-
-    @property
-    def projects(self):
-        projects = self[self.is_project]
-        projects.mines = self.mines[self.is_project]
-        return projects
-
-    def by_lineitem(self, short_name, how='list'):
-        items = [getattr(mstat, short_name) for mstat in self]
-
-        if how == 'list':
-            return items
-        elif how == 'frame':
-            return pd.concat(items, keys=[m.name for m in self.mines], axis=1).T
-        else:
-            raise
-
-    def finalize(self, env, network_hashes, pbar=None):
-        env.add_account(network_hashes, name='Network Hashes', short_name='net_hashes')
-        env.add_account(expected_difficulty(env.net_hashes), name='Difficulty')
-        env.add_account(hashes_to_hash_rate(env.net_hashes), name='Network Hash Rate', short_name='net_hr')
-
-        for mine, minestat in self.items():
-            PoolTemplate.finalize(minestat, env, mine)
-            if pbar:
-                pbar.update()
-
-# class ProjectTemplate:
-#     def __new__(self, mine, tax_rate=0, **kwargs):
-#         stat = fs.FinancialStatement(name=mine.name, short_name=mine.short_name, **kwargs)
-#         stat.add_factor('tax_rate', tax_rate)
-
-#         stat.add_statement(name='Environment', short_name='env')
-#         stat.add_statement(name='Income Statement')
-        
-#         stat.env.add_account(mine.miner_schedule, name='Number of Miners', short_name='n_miners')
-#         stat.env.add_account(mine.miner.consumption_variance(stat.periods.size), name='Power Variance', short_name='pow_var', hide=True)
-#         stat.env.add_account(
-#             fs.arr.multiply(stat.n_miners, mine.miner.power.consumption_per_block().in_joules(), stat.pow_var), 
-#             name='Energy (J) - Miner', 
-#             short_name='miner_energy_in_joules',
-#             hide=True
-#         )
-
-#         stat.env.add_account(fs.arr.multiply(stat.n_miners, mine.miner.power.consumption_per_block(), stat.pow_var), name='Energy - Miner', short_name='miner_energy')
-#         stat.env.add_account(total_energy(stat.miner_energy, mine.cooling.pue), name='Energy - Cooling', short_name='cool_energy')
-#         stat.env.add_account(fs.arr.add(stat.cool_energy, stat.miner_energy), name='Energy')
-
-#         stat.env.add_account(fs.arr.multiply(mine.miner.hr, stat.n_miners), name='Hash Rate')
-#         stat.env.add_account(fs.arr.multiply(mine.miner.hr.hashes_per_block(), stat.n_miners), name='Hashes')
-
-#         return stat
-
-#     @staticmethod
-#     def finalize(stat, mine, env):
-#         stat.env.add_account(win_percentage(stat.hashes, env.difficulty), name='Win %', short_name='win_per')
-
-#         stat.env.add_account(fs.arr.multiply(stat.win_per, env.reward), name='BTC Reward', short_name='btc_reward')
-#         stat.env.add_account(fs.arr.multiply(stat.win_per, env.fees), name='Transaction Fees', short_name='traxn_fees')
-#         stat.env.add_account(fs.arr.multiply(stat.btc_reward, mine.pool_fee), name='Pool Fees (\u0243)', short_name='pool_fees_in_btc')
-#         stat.env.add_account(fs.arr.add(stat.btc_reward, stat.traxn_fees, -stat.pool_fees_in_btc), name='BTC Mined', short_name='btc_mined')
-
-#         stat.istat.add_account(fs.arr.multiply(stat.btc_reward, env.btc_price), name='Revenue - Reward', short_name='reward_rev')
-#         stat.istat.add_account(fs.arr.multiply(stat.traxn_fees, env.btc_price), name='Revenue - Fees', short_name='fee_rev')
-#         stat.istat.add_account(fs.arr.add(stat.fee_rev, stat.reward_rev), name='Gross Revenue', short_name='gross_rev')
-
-#         stat.istat.add_account(fs.arr.multiply(stat.pool_fees_in_btc, env.btc_price), name='Pool Fees', short_name='pool_fees')
-#         stat.istat.add_account(fs.arr.add(stat.gross_rev, -stat.pool_fees), name='Net Revenue', short_name='net_rev')
-#         stat.istat.add_account(fs.arr.multiply(stat.btc_mined, env.btc_price), name='Test Net Revenue', short_name='test_net_rev', hide=True)
-
-#         stat.istat.add_account(fs.arr.multiply(stat.energy, mine.energy_cost), name='Energy Expenses', short_name='energy_exp')
-#         stat.istat.add_account(fs.arr.add(stat.net_rev, -stat.energy_exp), name='Gross Profit')
-#         stat.istat.add_account(fs.arr.divide(stat.gp, stat.net_rev), name='Gross Margin', hide=True)
-
-#         stat.istat.add_account(fs.arr.multiply(stat.energy, mine.opex_cost.cost_per_block()), name='Operations', short_name='ops')
-#         stat.istat.add_account(fs.arr.repeat(mine.property_taxes_per_block, stat.periods.size, mine.implement.start_in_blocks(), periods=stat.periods), name='Property Taxes', short_name='prop_tax')
-
-#         stat.istat.add_account(fs.arr.add(stat.gp, -stat.ops, -stat.prop_tax), name='EBITDA')
-
-#         stat.istat.add_account(miner_amort(mine, periods=stat.periods), name='Miner Amortization', short_name='miner_amort')
-#         stat.istat.add_account(amort_sched(mine.build_cost, 1, mine.property_amort, mine.implement.start_in_blocks(), periods=stat.periods), name='Building Amortization', short_name='build_amort')
-#         stat.istat.add_account(amort_sched(mine.cost_of_cooling, 1, mine.cooling.amort, mine.implement.start_in_blocks(), periods=stat.periods), name='Cooling Amortization', short_name='cool_amort')
-
-#         stat.istat.add_account(fs.arr.add(stat.miner_amort, stat.build_amort, stat.cool_amort), name='Depreciation for Taxes', short_name='tax_depn')
-
-#         stat.istat.add_account(fs.arr.add(stat.ebitda, -stat.tax_depn), name='EBIT')
-#         stat.istat.add_account(fs.arr.multiply(stat.ebit, stat.tax_rate), name='Taxes')
-
-#         stat.istat.add_account(fs.arr.add(stat.ebit, -stat.taxes), name='Profit, if sold', short_name='profit_sold')
-#         stat.istat.add_account(fs.arr.add(stat.ebitda, -stat.taxes), name='Operating Cash Flow, if sold', short_name='op_flow_sold')
-
-#         stat.istat.add_account(fs.arr.add(stat.energy_exp, stat.ops, stat.prop_tax, stat.taxes), name='Cash Expenses', short_name='cash_exp', hide=True)
-#         stat.istat.add_account(fs.arr.divide(stat.cash_exp, env.btc_price), name='BTC Converted for Expenses', short_name='converted')
-        
-#         stat.istat.add_account(fs.arr.add(stat.btc_mined, -stat.converted), name='BTC Earned', short_name='btc_earned')
-#         stat.istat.add_account(fs.arr.cumsum(stat.btc_earned), name='BTC, if held', short_name='btc_held')
-
-#         stat.istat.add_account(fs.arr.multiply(stat.btc_held, env.btc_price), name='BTC Value, if held', short_name='btc_value_held')
-
-#         roi = ROITemplate(stat, mine)
-#         stat.add_related(roi.short_name, roi)
-
 class ROITemplate:
-    def __new__(self, stat, mine):
+    def __new__(self, stat, project):
         resamp = stat.istat.resample('M').sum(last=['btc_held', 'btc_value_held'])
-        roi_periods = pd.period_range(end=resamp.periods[-1], periods=resamp.periods.size + 1, freq=resamp.periods.freq)
+        roi_periods = pd.period_range(
+            end=resamp.periods[-1], 
+            periods=resamp.periods.size + 1, 
+            freq=resamp.periods.freq
+        )
 
         roi = fs.FinancialStatement(name='ROI', periods=roi_periods)
         outlays = np.zeros(roi_periods.size)
-        outidx = mine.implement.start
-        outlays[outidx] = -mine.capital_cost
+        outidx = 0
+        outlays[outidx] = -project.capital_cost()
 
         inflows = np.zeros(roi_periods.size)
         inflows[1:] = resamp.op_flow_sold.values
@@ -323,6 +167,27 @@ class ROITemplate:
         held_delta[1] = resamp.btc_value_held.iloc[0]
 
         cum_btc[1:] = resamp.btc_value_held.values
+
+        rig_out = np.zeros(roi_periods.size)
+        outidx = 0
+        rig_out[outidx] = -project.rig_cost()
+        roi.add_account(rig_out, name='Rigs Outlay', short_name='rigs_out')
+
+        for k, v in project.infra_cost_schedule().items():        
+            infra_out = np.zeros(roi_periods.size)
+            outidx = 0
+            infra_out[outidx] = -v
+            roi.add_account(infra_out, name=f'{k} Outlay', short_name=f'{k.replace(" ", "_  ").lower()}_out')
+
+        infra_out = np.zeros(roi_periods.size)
+        outidx = 0
+        infra_out[outidx] = -project.infra_cost()
+        roi.add_account(infra_out, name='Infrastructure Outlay', short_name='infra_out')
+
+        build_out = np.zeros(roi_periods.size)
+        outidx = 0
+        build_out[outidx] = -project.building_cost()
+        roi.add_account(build_out, name='Building Outlay', short_name='build_out')
 
         roi.add_account(outlays, name='Cash Outlays', short_name='cash_out')
         roi.add_account(held_delta, name='Operating Cash Flow, held', short_name='op_flow_held')
@@ -341,125 +206,146 @@ class ROITemplate:
 
         return roi
 
-class ProjectStats(PoolStats):
-    def __new__(cls, mines, periods, pbar=None, **kwargs):
-        minerstats = []
-        
-        for mine in mines:
-            minerstat = ProjectTemplate(mine, periods=periods, no_model=True, **kwargs)
-            minerstats.append(minerstat)
-            if pbar is not None:
-                pbar.update(1)
-
-        assert np.all(minerstats[0].lineitems.short_names == [s.lineitems.short_names for s in minerstats])
-        
-        obj = np.asarray([o for o in minerstats], dtype='object').view(cls)
-        obj.mines = mines
-        obj.periods = periods
-
-        return obj
+class analysis:
+    def __init__(self, stat, project):
+        self.stat = stat
+        self.project = project
 
     @property
-    def rois(self):
-        has_roi = [hasattr(mstat, 'roi') for mstat in self]
-        rois = [mstat.roi for mstat in self[has_roi]]
-        return ROIS(rois, self.mines[has_roi])
-
-    def finalize(self, env, pbar=None):
-        for mine, projstat in self.items():
-            ProjectTemplate.finalize(projstat, mine, env)
-            if pbar:
-                pbar.update()
-                
-class ROIS(ProjectStats):
-    def __new__(cls, rois, mines):
-        obj = np.asarray([o for o in rois], dtype='object').view(cls)
-        obj.mines = mines
-
-        return obj
-
-    def __array_finalize__(self, obj):
-        if obj is None: return
-        self.mines = getattr(obj, 'mines', None)
+    def roi(self):
+        return self.stat.roi
 
     @property
     def btc_held(self):
-        return [roi.btc_held[-1] for roi in self]
+        return self.roi.btc_held[-1]
 
     @property
     def op_flow_sold(self):
-        return [roi.op_flow_sold.sum() for roi in self]
+        return self.roi.op_flow_sold.sum()
 
     @property
     def op_flow_held(self):
-        return [roi.op_flow_held.sum() for roi in self]
+        return self.roi.op_flow_held.sum()
 
     @property
     def total_cash_sold(self):
-        return [roi.cum_flow_sold[-1] for roi in self]
+        return self.roi.cum_flow_sold[-1]
 
     @property
     def total_cash_held(self):
-        return [roi.cum_flow_held[-1] for roi in self]
+        return self.roi.cum_flow_held[-1]
 
     @property
-    def rois_sold(self):
-        return [roi.roi_sold[-1] for roi in self]
+    def roi_sold(self):
+        return self.roi.roi_sold[-1]
 
     @property
-    def rois_held(self):
-        return [roi.roi_held[-1] for roi in self]
+    def roi_held(self):
+        return self.roi.roi_held[-1]
 
-    def irr(self, mine, roi, n=None, lineitem='net_flow_held'):
-        lineitem = getattr(roi, lineitem)
+    def irr(self, n=None, lineitem='net_flow_held', annualize=True):
+        lineitem = getattr(self.roi, lineitem)
         if n is None:
-            n = roi.periods.size
+            n = self.roi.periods.size
         
-        start = mine.implement.start
-        return npf.irr(lineitem.iloc[start: start + n])
+        start = 0
+        irr = npf.irr(lineitem.iloc[start: start + n])
 
-    def irrs(self, periods, **kwargs):
-        return [(1 + self.irr(mine, roi, periods, **kwargs))**12 - 1 for mine, roi in self.items()]
+        if annualize:
+            irr = (1 + irr)**12 - 1
+        
+        return irr
 
     @property
     def three_yr_irr(self):
-        return self.irrs(36)
+        return self.irr(36)
 
     @property
     def five_yr_irr(self):
-        return self.irrs(60)
+        return self.irr(60)
 
     @property
     def terminal_irr(self):
-        return self.irrs(None)
+        return self.irr(None)
 
     @property
-    def breakevens(self):
-        def beven_idx(mine, ser):
-            start = mine.implement.start
-            return ser.iloc[start:].abs().idxmin()
+    def breakeven(self):
+        return self.roi.roi_held.abs().idxmin()
 
-        return [beven_idx(mine, roi.roi_held) for mine, roi in self.items()]
+    @property
+    def hashes(self):
+        return self.stat.env.hashes.sum()
+
+    @property
+    def energy(self):
+        return Energy(self.stat.env.energy.sum()).in_joules()
+    
+    @property
+    def efficiency(self):
+        return self.hashes / self.energy
+
+    @property
+    def energy_expense(self):
+        return self.stat.istat.energy_exp.sum()
+
+    @property
+    def total_cash_expense(self):
+        return self.stat.istat.energy_exp.sum() + self.stat.istat.ops.sum() + self.stat.istat.prop_tax.sum() + self.stat.istat.taxes.sum()
+
+    @property
+    def rig_costs(self):
+        return -self.stat.roi.rigs_out.sum()
+
+    @property
+    def infra_costs(self):
+        return {infra.name + ' Cost': infra.cost() for infra in self.project.infrastructure}
+
+    @property
+    def total_infra_costs(self):
+        return sum(self.infra_costs.values())
+
+    @property
+    def capital_costs(self):
+        return -self.stat.roi.cash_out.sum()
+
+    @property
+    def total_cost(self):
+        return self.total_cash_expense + self.capital_costs
+
+    @property
+    def hash_prices(self):
+        hash_prices = {}
+        for n in [n for n in self.stat.roi.G.nodes if '_out' in n]:
+            acct = getattr(self.stat.roi, n)
+            hash_prices[n.rstrip('_out').replace('_', ' ').title() + ' Hash Price'] = acct.sum() / self.hashes
+
+        return hash_prices
 
     def summary(self):
-        return pd.DataFrame([
-            self.btc_held,
-            self.op_flow_held,
-            # self.total_cash_sold,
-            self.total_cash_held,
-            # self.rois_sold,
-            self.rois_held,
-            self.three_yr_irr,
-            self.five_yr_irr,
-            self.terminal_irr,
-            self.breakevens,
-            ], index=[
-                'BTC, held', 
-                'Net Cash Flow, held',
-                'Net Gain, held', 
-                'ROI, held',
-                'IRR 3-year, held', 'IRR 5-year held', f'IRR terminal, held',
-                'Breakeven'
-            ],
-            columns=self.mines.names
-        )
+        return {
+            'Capacity': self.project.capacity,
+            'Compute Power': self.project.compute_power,
+            'Infra Power': self.project.infra_power,
+            'Number of Rigs': self.project.rigs.quantity,
+            'Hash Rate': self.project.rigs.total_hash_rate,
+            'Hash Rate per Rig': self.project.hash_rate_per_rig,
+            'Total Hashes': self.hashes,
+            'Energy Consumption': self.energy,
+            'Efficiency': self.efficiency,
+            'Energy Expense': self.energy_expense,
+            'Total Expenses': self.total_cash_expense,
+            'Rig Costs': self.rig_costs,
+            **self.infra_costs,
+            'Total Infra Costs': self.total_infra_costs,
+            'Capital Costs': self.capital_costs,
+            'Total Cost': self.total_cost,
+            **self.hash_prices,
+            'BTC, held': self.btc_held,
+            'Net Cash Flow, held': self.op_flow_held,
+            'Net Gain, held': self.total_cash_held,
+            'ROI, held': self.roi_held,
+            'IRR 3-year, held': self.three_yr_irr,
+            'IRR 5-year, held': self.five_yr_irr,
+            f'IRR terminal, held': self.terminal_irr,
+            'Breakeven': self.breakeven.strftime('%Y-%m-%d'),
+        }
