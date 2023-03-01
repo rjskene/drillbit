@@ -60,13 +60,11 @@ class ProjectTemplate:
             name='Energy - Miner', 
             short_name='miner_energy'
         )
-
         stat.env.add_account(total_energy(stat.miner_energy, project.pue), name='Energy - Infra', short_name='infra_energy')
         stat.env.add_account(fs.arr.add(stat.infra_energy, stat.miner_energy), name='Energy')
 
         stat.env.add_account(fs.arr.multiply(project.hash_rate_per_rig.value, stat.n_miners), name='Hash Rate')
         stat.env.add_account(hash_rate_to_hashes(stat.hr), name='Hashes')
-
         stat.env.add_account(win_percentage(stat.hashes, env.difficulty), name='Hash Share', short_name='hash_share')
 
         stat.env.add_account(fs.arr.multiply(stat.hash_share, env.reward), name='BTC Reward', short_name='btc_reward')
@@ -282,7 +280,7 @@ class analysis:
     
     @property
     def efficiency(self):
-        return self.hashes / self.energy
+        return self.energy / self.hashes # energy must be in joules for this to work / returns joules/hash
 
     @property
     def energy_expense(self):
@@ -317,7 +315,7 @@ class analysis:
         hash_prices = {}
         for n in [n for n in self.stat.roi.G.nodes if '_out' in n]:
             acct = getattr(self.stat.roi, n)
-            hash_prices[n.rstrip('_out').replace('_', ' ').title() + ' Hash Price'] = acct.sum() / self.hashes
+            hash_prices[n.rstrip('_out').replace('_', ' ').title() + ' Hash Price'] = -acct.sum() / self.hashes
 
         return hash_prices
 
