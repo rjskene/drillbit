@@ -175,7 +175,8 @@ class ROITemplate:
             infra_out = np.zeros(roi_periods.size)
             outidx = 0
             infra_out[outidx] = -v
-            roi.add_account(infra_out, name=f'{k} Outlay', short_name=f'{k.replace(" ", "_  ").lower()}_out')
+            short_name = k.replace(" ", "_").replace('/', '_').replace('.', '_').replace('-', '_').lower()
+            roi.add_account(infra_out, name=f'{k} Outlay', short_name=f'{short_name}_out')
 
         infra_out = np.zeros(roi_periods.size)
         outidx = 0

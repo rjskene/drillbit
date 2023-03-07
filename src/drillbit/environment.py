@@ -49,9 +49,9 @@ class BlockChainAPIClient:
 
     def latest_block(self, raw=True):
         url = 'https://blockchain.info/latestblock'
-        block = requests.get(url).json()
+        block = requests.get(url).json()        
         del block['txIndexes']
-        
+
         if raw:
             block_url = f'https://blockchain.info/rawblock/{block["hash"]}'
             block = requests.get(block_url).json()
@@ -238,8 +238,8 @@ class BitcoinEnvironmentUtility(ProjectionUtilityMixin, MiningMixin):
 
     def __init__(self):
         self.client = BlockChainAPIClient()
-        # self.update_meta()
-        self.mock_meta()
+        self.update_meta()
+        # self.mock_meta()
 
     def mock_meta(self):
         self._CURRENT_BLOCK = 712000        
@@ -330,5 +330,5 @@ class BitcoinEnvironmentUtility(ProjectionUtilityMixin, MiningMixin):
             self.difficulty,
             self.expected_hash_rate().__repr__(),
             ],
-            index=['Last Updated', 'Price', 'Block', 'Epoch', 'Reward', 'Target', 'Difficulty', 'Hash Rate'], name='Summary'
+            index=['Last Updated', 'Price', 'Block', 'Epoch', 'Reward', 'Target', 'Difficulty', 'Network Hash Rate'], name='Summary'
         )

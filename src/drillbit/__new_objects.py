@@ -79,18 +79,18 @@ class Rig:
 class Product:
     """Object for managing mining rig properties"""
     name: str
-    power: Power
+    capacity: Power
     pue: float
     price: float
 
     def __post_init__(self):
-        if not isinstance(self.power, Power):
-            self.power = Power(self.power)
+        if not isinstance(self.capacity, Power):
+            self.capacity = Power(self.capacity)
 
     def __repr__(self):
         return (
             f'Product(name={self.name},'
-            f'power={self.power},'
+            f'capacity={self.capacity},'
             f'pue={self.pue},'
             f'price={self.price},'  
         )
@@ -105,6 +105,7 @@ class Cooling(Product):
 @dataclass
 class HeatRejection(Product):
     """Object for managing coolers properties"""
+    design_dry_bulb: float
     curve: tuple[float, float]
 
     def capacity_at_temp(self, temp):

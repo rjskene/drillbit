@@ -1,3 +1,6 @@
+"""
+See https://en.bitcoin.it/wiki/Difficulty
+"""
 import typing as typ
 from nptyping import NDArray, Int, Shape
 
