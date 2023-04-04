@@ -143,7 +143,7 @@ class ROITemplate:
     def __new__(self, stat, project):
         resamp = stat.istat.resample('M').sum(last=['btc_held', 'btc_value_held'])
         roi_periods = pd.period_range(
-            end=resamp.periods[-1], 
+            end=resamp.periods[-1],
             periods=resamp.periods.size + 1, 
             freq=resamp.periods.freq
         )

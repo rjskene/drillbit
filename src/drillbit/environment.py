@@ -242,7 +242,7 @@ class BitcoinEnvironmentUtility(ProjectionUtilityMixin, MiningMixin):
         # self.mock_meta()
 
     def mock_meta(self):
-        self._CURRENT_BLOCK = 712000        
+        self._CURRENT_BLOCK = 712000
 
     def update_meta(self):
         print ('updating meta', end='...')
@@ -328,7 +328,7 @@ class BitcoinEnvironmentUtility(ProjectionUtilityMixin, MiningMixin):
             self.current_reward,
             self.target_hash,
             self.difficulty,
-            self.expected_hash_rate().__repr__(),
+            self.expected_hash_rate(),
             ],
             index=['Last Updated', 'Price', 'Block', 'Epoch', 'Reward', 'Target', 'Difficulty', 'Network Hash Rate'], name='Summary'
         )

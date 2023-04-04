@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
@@ -110,22 +110,36 @@ class HeatRejection(Product):
 
     def capacity_at_temp(self, temp):
         return Power(temp * self.curve[0] + self.curve[1])
+    
+    @property
+    def a(self):
+        return self.curve[0]
+    
+    @property
+    def b(self):
+        return self.curve[1]
+
+    @property
+    def max_temp_supported_by_curve(self):
+        return -self.b / self.a
 
 class ProductOperator:
     PRODUCT_TYPE = 'product'
     def __init__(self, 
         product, 
-        quantity=0, 
-        implementation=None,
+        quantity=0,
         amortization=60,
+        price=None,
         ):
         setattr(self, self.PRODUCT_TYPE, product)
         self.quantity = quantity
-        self.implementation = implementation
         self.amortization = amortization
 
         for k, v in getattr(self, self.PRODUCT_TYPE).__dict__.items():
             setattr(self, k, v)
+
+        if price is not None:
+            self.price = price
 
     def cost(self):
         return self.price * self.quantity
@@ -138,22 +152,17 @@ class RigOperator(ProductOperator):
         **kwargs
         ):
         super().__init__(*args, **kwargs)
+
         self._overclock_manager = OverClock(factor=overclocking, rig=self.rig)
+        self.schedule = self.quantity
  
     @property
     def OC(self):
         return self._overclock_manager
 
     @property
-    def schedule(self):
-        if self.implementation is None:
-            return self.quantity
-        else:
-            return self.implementation.schedule
-
-    @property
     def total_hash_rate(self):
-        return self.OC.rig.hash_rate * self.schedule
+        return self.OC.rig.hash_rate * self.quantity
 
 class CoolingOperator(ProductOperator):
     PRODUCT_TYPE = 'cooling'
@@ -244,7 +253,7 @@ class Project:
     infrastructure: list[Product]
     target_overclocking: OverClock = 1
     energy_price: EnergyPrice = 0
-    target_ambient_temp: float = 95
+    target_ambient_temp: list = field(default_factory=list)
     pool_fees: float = 0
     tax_rate: float = 0
     opex: float = 0
@@ -261,21 +270,23 @@ class Project:
         if not isinstance(self.energy_price, EnergyPrice):
             self.energy_price = EnergyPrice(self.energy_price)
 
-    def _get_scaler(self):
-        return ProjectScaler(self)
+        self.scaler = ProjectScaler(self)
+        self.operator = ProjectOperator(self)
 
     def scale(self):
-        scaler = self._get_scaler()
-        scaler.assign_quantities()
+        self.scaler.assign_quantities()
         return self
+    
+    def implement(self):
+        self.operator.set_rig_schedule()
 
     @property
     def pue(self):
-        return self._get_scaler().project_pue()
+        return self.scaler.project_pue()
 
     @property
     def compute_power(self):
-        return self._get_scaler().compute_power()
+        return self.scaler.compute_power()
 
     @property
     def infra_power(self):
@@ -292,6 +303,11 @@ class Project:
     @property
     def consumption_per_rig_per_block(self):
         return self.power_per_rig.consumption_per_block()
+
+    @property
+    def heat_rejection(self):
+        assert isinstance(self.infrastructure[1], HeatRejectionOperator)
+        return self.infrastructure[1]
 
     def rig_cost(self):
         return self.rigs.price * self.rigs.quantity
@@ -328,12 +344,10 @@ class ProjectScaler:
         return self.project.capacity / self.total_power_per_rig()
     
     def infrastructure_quantity(self, product):
-        if hasattr(product, 'curve'):
-            power_per_unit = product.capacity_at_temp(self.project.target_ambient_temp)
-        elif hasattr(product, 'number_of_rigs'):
+        if hasattr(product, 'number_of_rigs'):
             power_per_unit = product.number_of_rigs * self.compute_power_per_rig()
         else:
-            power_per_unit = product.power
+            power_per_unit = product.capacity   
 
         return self.compute_power() / power_per_unit
 
@@ -347,3 +361,36 @@ class ProjectScaler:
     def assign_quantities(self):
         self.assign_rig_quantity()
         self.assign_infrastructure_quantity()
+
+class ProjectOperator(ProjectScaler):
+    def capacity_schedule(self):
+        """
+        Creates a capacity schedule according to different attributes of the project. For now, only 
+        target_ambient_temp is supported. 
+        
+        For target_ambient_temp, the capacity schedule is the capacity of the project multiplied by 
+        the heat rejection curve, when the ambient temp is clipped at the lower bound of the drycooler design dry bulb spec.
+        Then the project level capacity is determined by the number of coolers and clipped at the total project capacity.
+        
+        If this is not set, then the
+        capacity schedule is just the capacity of the project.
+        """
+        # clip temps at the upper and lower bound of the drycooler
+        if self.project.target_ambient_temp:
+            adj_temp = pd.Series(self.project.target_ambient_temp).clip(
+                lower=self.project.heat_rejection.heat_rejection.design_dry_bulb,
+                upper=self.project.heat_rejection.heat_rejection.max_temp_supported_by_curve
+            )
+
+            a, b = self.project.heat_rejection.heat_rejection.curve
+
+            capacity_per_cooler = a*adj_temp + b
+            return (capacity_per_cooler * self.project.heat_rejection.quantity).clip(upper=self.project.capacity)
+        else:
+            return self.project.capacity
+        
+    def set_rig_schedule(self):
+        """
+        Set the schedule of the number of rigs operating based on the available power capacity
+        """
+        self.project.rigs.schedule = self.capacity_schedule() / self.total_power_per_rig()
