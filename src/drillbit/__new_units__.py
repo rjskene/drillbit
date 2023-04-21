@@ -1,3 +1,11 @@
+"""
+TO DO:
+
+> bugs:
+    > Efficiency does not return an optimized value when float provided
+        Efficiency(value / 1e12, 'J / TH') 
+
+"""
 import warnings
 from abc import ABC, abstractmethod
 

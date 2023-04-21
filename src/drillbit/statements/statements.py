@@ -28,7 +28,7 @@ def init_environment(block_schedule, price, fees, hash_rate):
     return stat
 
 class ProjectTemplate:
-    def __new__(self, env, project):
+    def __new__(self, env, project, add_roi=False):
         """
         Attributes from the project, rig, and infrastructure objects are plugged into the
         financial statement template. These attributes may either be:
@@ -48,27 +48,28 @@ class ProjectTemplate:
         stat.add_statement(name='Environment', short_name='env')
         stat.add_statement(name='Income Statement')
 
-        stat.env.add_account(project.rigs.schedule, name='Number of Miners', short_name='n_miners')
+        stat.env.add_account(project.rigs.schedule, name='Number of Rigs', short_name='n_rigs')
         stat.env.add_account(
-            fs.arr.multiply(stat.n_miners, project.consumption_per_rig_per_block.in_joules()), 
-            name='Energy (J) - Miner', 
-            short_name='miner_energy_in_joules',
+            fs.arr.multiply(stat.n_rigs, project.consumption_per_rig_per_block.in_joules()), 
+            name='Energy (J) - Rigs', 
+            short_name='rig_energy_in_joules',
             hide=True
         )
         stat.env.add_account(
-            fs.arr.multiply(stat.n_miners, project.consumption_per_rig_per_block), 
-            name='Energy - Miner', 
-            short_name='miner_energy'
+            fs.arr.multiply(stat.n_rigs, project.consumption_per_rig_per_block), 
+            name='Energy - Rigs', 
+            short_name='rig_energy'
         )
-        stat.env.add_account(total_energy(stat.miner_energy, project.pue), name='Energy - Infra', short_name='infra_energy')
-        stat.env.add_account(fs.arr.add(stat.infra_energy, stat.miner_energy), name='Energy')
+        stat.env.add_account(total_energy(stat.rig_energy, project.pue), name='Energy - Infra', short_name='infra_energy')
+        stat.env.add_account(fs.arr.add(stat.infra_energy, stat.rig_energy), name='Energy')
 
-        stat.env.add_account(fs.arr.multiply(project.hash_rate_per_rig.value, stat.n_miners), name='Hash Rate')
+        stat.env.add_account(fs.arr.multiply(project.hash_rate_per_rig.value, stat.n_rigs), name='Hash Rate')
         stat.env.add_account(hash_rate_to_hashes(stat.hr), name='Hashes')
         stat.env.add_account(win_percentage(stat.hashes, env.difficulty), name='Hash Share', short_name='hash_share')
 
         stat.env.add_account(fs.arr.multiply(stat.hash_share, env.reward), name='BTC Reward', short_name='btc_reward')
         stat.env.add_account(fs.arr.multiply(stat.hash_share, env.fees), name='Transaction Fees', short_name='traxn_fees')
+        
         stat.env.add_account(fs.arr.multiply(stat.btc_reward, project.pool_fees), name='Pool Fees (\u0243)', short_name='pool_fees_in_btc')
         stat.env.add_account(fs.arr.add(stat.btc_reward, stat.traxn_fees, -stat.pool_fees_in_btc), name='BTC Mined', short_name='btc_mined')
 
@@ -94,7 +95,7 @@ class ProjectTemplate:
                 env.periods.size,
                 project.rigs.amortization,
                 project.rigs.price,
-                stat.n_miners,
+                stat.n_rigs,
             ), name='Rig Amortization', short_name='rig_amort'
         )
         for i, infra in enumerate(project.infrastructure):
@@ -134,8 +135,9 @@ class ProjectTemplate:
 
         stat.istat.add_account(fs.arr.multiply(stat.btc_held, env.btc_price), name='BTC Value, if held', short_name='btc_value_held')
 
-        roi = ROITemplate(stat, project)
-        stat.add_related(roi.short_name, roi)
+        if add_roi:
+            roi = ROITemplate(stat, project)
+            stat.add_related(roi.short_name, roi)
 
         return stat
 
